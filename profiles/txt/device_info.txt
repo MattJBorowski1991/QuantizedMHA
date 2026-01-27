@@ -1,0 +1,20 @@
+Device 0: Tesla T4
+Compute Capability: 7.5
+SM Count (multiProcessorCount): 40
+Max Threads Per Block: 1024
+Max Threads Dim: [1024, 1024, 64]
+Max Grid Size: [2147483647, 65535, 65535]
+Warp Size: 32
+Shared Mem Per Block: 49152 bytes
+Shared Mem Per Multiprocessor: 65536 bytes
+Registers Per Block: 65536
+Regs Per Multiprocessor: 65536
+Max Blocks Per Multiprocessor: 16
+Max Threads Per Multiprocessor: 1024
+Memory Clock Rate: 5001000 kHz
+Memory Bus Width: 256 bits
+Total Global Memory: 15828320256 bytes
+L2 Cache Size: 4194304 bytes
+Concurrent Kernels: Yes
+Cooperative Launch: Yes
+Max Shared Mem Optin Per Block: 65536 bytes

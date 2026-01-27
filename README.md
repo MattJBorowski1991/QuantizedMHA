@@ -6,7 +6,7 @@ High-performance CUDA implementations of FlashAttention-2 with various optimizat
 
 ### 1. Build
 ```bash
-make clean && make NVCC_ARCH=86
+make clean && make NVCC_ARCH=XX
 ```
 
 Replace `86` with your target GPU compute capability (e.g., `80` for A100, `89` for RTX 4090, `90` for H100).

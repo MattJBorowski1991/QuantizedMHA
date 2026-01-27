@@ -2,7 +2,7 @@
 #include <math.h>
 #include "../include/config.h"
 #include "../include/launchers.h"
-#include "../utils.cu"
+#include "../utils/utils.cu"
 
 // Standard Flash-Attention 2: single-pass proper per-query-row online softmax
 
@@ -168,10 +168,11 @@ void launch_fa_warps(
 }
 
 
-MHA_SOLVE(
-    [](const float* q_s, const float* k_s, const float* v_s, float* out_s, int N, int d_head, float alpha, cudaStream_t stream, void* aux){
+extern "C" void solve(const float *Q, const float *K, const float *V, float *output, int N, int d_model, int h)
+{
+    auto fa_warps_kernel = [](const float* q_s, const float* k_s, const float* v_s, float* out_s, int N, int d_head, float alpha, cudaStream_t stream, void* aux){
         (void)aux;
         launch_fa_warps<Br, Bc>(q_s, k_s, v_s, out_s, N, d_head, alpha, stream);
-    },
-    0
-)
+    };
+    launch(Q, K, V, output, N, d_model, h, fa_warps_kernel, 0);
+}

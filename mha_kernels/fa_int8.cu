@@ -4,7 +4,7 @@
 #include <mma.h>
 #include "../include/config.h"
 #include "../include/launchers.h"
-#include "../utils.cu"
+#include "../utils/utils.cu"
 
 using namespace nvcuda;
 
@@ -192,7 +192,7 @@ __global__ void fa_int8(
 
     // Epilogue: Store O fragments to shared memory
     for(int k=0; k < num_frags; ++k) 
-        wmma::store_matrix_sync((int*)&sQ[(warp_id * 16) * d + k*16], frag_O[k], d, wmma::mem_row_major);
+        wmma::store_matrix_sync((float*)&sQ[(warp_id * 16) * d + k*16], frag_O[k], d, wmma::mem_row_major);
     __syncthreads();
     
     // Normalize & Write Global with dequantization
@@ -243,10 +243,11 @@ void launch_fa_int8(
 }
 
 
-MHA_SOLVE(
-    [=](const float* q_s, const float* k_s, const float* v_s, float* out_s, int N, int d_head, float alpha, cudaStream_t stream, void* aux){
+extern "C" void solve(const float *Q, const float *K, const float *V, float *output, int N, int d_model, int h)
+{
+    auto fa_int8_kernel = [](const float* q_s, const float* k_s, const float* v_s, float* out_s, int N, int d_head, float alpha, cudaStream_t stream, void* aux){
         (void)aux;
         launch_fa_int8<Br, Bc>(q_s, k_s, v_s, out_s, N, d_head, alpha, stream);
-    },
-    0
-)
+    };
+    launch(Q, K, V, output, N, d_model, h, fa_int8_kernel, 0);
+}

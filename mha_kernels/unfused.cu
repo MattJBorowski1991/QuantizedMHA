@@ -2,7 +2,7 @@
 #include <math.h>
 #include "../include/config.h"
 #include "../include/launchers.h"
-#include "../utils.cu"
+#include "../utils/utils.cu"
 
 template<int TILE>
 __global__ void mma_A_B(
@@ -171,15 +171,15 @@ void launch_softmax(const float *input, float *output, int N, cudaStream_t strea
     softmax<TILE><<<blocksPerGrid, threadsPerBlock, 0, stream>>>(input, output, N);
 }
 
-MHA_SOLVE(      // safer here to use capture by value [=] here instead of no-capture [] as we do manual pointer math on the aux buffer: per_softmax
-    [=](const float* q_s, const float* k_s, const float* v_s, float* out_s, int N, int d_head, float alpha, cudaStream_t stream, void* aux){
+extern "C" void solve(const float *Q, const float *K, const float *V, float *output, int N, int d_model, int h)
+{
+    auto unfused_kernel = [](const float* q_s, const float* k_s, const float* v_s, float* out_s, int N, int d_head, float alpha, cudaStream_t stream, void* aux){
         size_t per_softmax = (size_t)N * N;
         float* softmax_in_s = (float*)aux;
         float* softmax_out_s = softmax_in_s + per_softmax;
         launch_mma_A_B<TILE>(q_s, k_s, softmax_in_s, N, N, d_head, alpha, true, stream);
         launch_softmax<TILE>(softmax_in_s, softmax_out_s, N, stream);
         launch_mma_A_B<TILE>(softmax_out_s, v_s, out_s, N, d_head, N, 1.0f, false, stream);
-    },
-    ((size_t)N * N * sizeof(float) * 2)  
-    // AUX_BYTES are non-zero here as only unfused.cu needs extra DRAM (to store softmax_in & softmax_out). FA computes everything in SRAM and regs.
-)
+    };
+    launch(Q, K, V, output, N, d_model, h, unfused_kernel, (size_t)N * N * sizeof(float) * 2);
+}
