@@ -1,43 +1,81 @@
-# Quantized Flash-Attention with RoPE & JAX Integration
+# Quantized Multi-Head Attention (QuantizedMHA)
 
-A high-performance CUDA library implementing a fused INT8/FP16 Multi-Head Attention kernel.
+High-performance CUDA implementations of FlashAttention-2 with various optimizations including quantization, Tensor Cores acceleration, and warp specialization.
 
-## Summary
+## Usage
 
-- Core: Build GEMM kernels from scratch using WMMA (Tensor Cores) with manual tiling and double-buffering.
-- Logic: Integrate Rotary Positional Embeddings (RoPE) directly into the Q/K loading phase to avoid global memory round-trips.
-- Optimization: Use Online Softmax (FlashAttention approach) to minimize register pressure and shared memory bottlenecks.
-- Profiling: Quantify performance using Nsight Compute, specifically targeting Compute Throughput (SM %) and Memory Bandwidth utilization.
-- Integration: Expose via Pybind11 as a JAX Custom Call, enabling use within XLA-compiled pipelines.
+### 1. Build
+```bash
+make clean && make NVCC_ARCH=86
+```
 
-## Proposed Extra Features (Choose 1-2)
+Replace `86` with your target GPU compute capability (e.g., `80` for A100, `89` for RTX 4090, `90` for H100).
 
-- **Grouped-Query Attention (GQA):** The current industry standard for efficient inference (used in Llama 3).
-- **Causal Masking Fusion:** Fuse the look-ahead mask directly into the attention score calculation to save bandwidth.
-- **KV-Cache Support:** Implement logic to handle incremental decoding for LLM inference.
-- **Sliding Window Attention (SWA):** Optimize for long-context sequences by limiting attention scope.
-- **Stochastic Rounding:** A sophisticated way to handle precision loss during INT8 quantization.
+### 2. Run Kernels
+```bash
+./bin/main --kernel=fa --warmup=5 --runs=10
+```
 
-## Crucial Amendments
+Available kernels: `unfused`, `fa`, `fa_warps`, `fa_tc`, `fa_int8`
 
-- **Unit Tests vs. Reference:** Include a Python test suite that compares your kernel outputs against `jax.nn.attention` to prove correctness and quantify the Floating Point Error (L2 Norm).
-- **Benchmarking:** Create a README.md with a table comparing your kernel's TFLOPS and Latency against a naive implementation and a standard library (like cuDNN or FlashAttention 2).
-- **Memory Pipelining:** Use `cp.async` (Async Copy) if targeting Ampere (RTX 30-series) or newer to overlap data movement with computation.
-- **Bank Conflicts:** Explicitly document how you avoided shared memory bank conflicts in your code comments; this is a common interview "trap" question.
+Options:
+- `--kernel=<NAME>` - Select kernel to run
+- `--warmup=N` - Number of warmup runs (default: 5)
+- `--runs=N` - Number of profiling runs (default: 10)
+- `--random` - Use random input data instead of constant values
+
+### 3. Profile with Nsight Compute
+
+Profile with PTX and SASS embedded:
+
+```bash
+ncu --import-source yes --set full --export profiles/ncu/fa_int8.ncu-rep ./bin/main --kernel=fa_int8 --warmup=5 --runs=10
+```
+
+Export txt and csv summaries:
+```bash
+ncu --import profiles/ncu/fa_int8.ncu-rep > profiles/txt/fa_int8.txt
+ncu --import profiles/ncu/fa_int8.ncu-rep --csv > profiles/csv/fa_int8.csv
+```
+
+Open `.ncu-rep` files directly in Nsight Compute.
+
+### 4. Debug
+```bash
+cuda-gdb ./bin/main
+run --kernel=fa_warps
+```
+
+Or with cuda-memcheck:
+```bash
+cuda-memcheck ./bin/main --kernel=fa
+```
 
 
+## Kernels
+
+### `unfused.cu` - Unfused Attention Components
+Implements individual operations of attention separately (Q@K^T, softmax, output projection) as standalone kernels rather than fusing them into a single kernel. This modular approach allows flexibility in optimization and profiling of individual attention components.
+
+### `fa.cu` - Standard FlashAttention-2
+A foundational FlashAttention-2 implementation with fused RoPE (Rotary Position Embeddings) that performs single-pass online softmax computation. Each block processes one Q tile with proper per-query-row normalization, using shared memory for efficient Q, K, V tile management.
+
+### `fa_warps.cu` - FlashAttention-2 with Warp Specialization
+A variant of FlashAttention-2 that assigns each warp in a block to handle one query row independently. This parallelization strategy uses shared memory efficiently to store multiple Q rows and shared K, V tiles, reducing synchronization overhead.
+
+### `fa_tc.cu` - FlashAttention-2 with Tensor Cores
+Optimized FlashAttention-2 kernel that leverages NVIDIA Tensor Cores (WMMA) and warp-level specialization for faster matrix operations. Uses half-precision (FP16) computations with double buffering (cp.async) to hide memory latency while maintaining numerical stability through float accumulation.
+
+### `fa_int8.cu` - FlashAttention-2 with Tensor Cores & INT8 Quantization
+Combines Tensor Core acceleration with INT8 quantization to reduce memory footprint and increase throughput. Supports quantization/dequantization with per-tensor scales and zero points for Q, K, V, enabling efficient inference on quantized attention computations.
 
 
+## Project Structure
 
-***** KERNEL COMPONENTS **********
-
-1. **Quantized GEMM (INT8)**
-	1.1 **Tiled:** Manual Shared Memory caching to minimize global memory bandwidth.
-	1.2 **WMMA + Async:** Using Tensor Cores via `mma.sync` or `wmma`, utilizing `cp.async` (for Ampere+) and double-buffering to hide latency.
-2. **Rotary Positional Embeddings (RoPE)** - apply the rotation math (sine/cosine) inside the MHA kernel to Q and K as they are being loaded from DRAM to SRAM/registers.
-3. **Multi-Head Attention (MHA)**
-	3.1 **Unfused (Baseline):** Three separate kernels (Q*K^T) -> softmax -> *V to quantify the speedup of fusion.
-	3.2 **Flash-Logic (The Goal):** Implement the Online Softmax algorithm. This allows you to compute attention on arbitrary sequence lengths without running out of shared memory by updating the softmax normalization factor incrementally.
-
-4. **System Integration**
-	- **JAX Custom Call:** Using Pybind11 to register these kernels, allowing you to run `jax.jit(my_cuda_attention)(...)` for end-to-end testing.
+- **`mha_kernels/`** - Core attention kernel implementations
+- **`extensions/`** - Language bindings (JAX, PyTorch)
+- **`tests/`** - Device-side unit tests for kernels
+- **`profiling/`** - Profiling tools and scripts
+- **`examples/`** - Example usage scripts
+- **`include/`** - Header files and configuration
+- **`utils/`** - Utility functions and verification code
