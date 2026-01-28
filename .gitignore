@@ -1,0 +1,17 @@
+# Build artifacts
+bin/
+*.o
+*.so
+*.a
+
+# Profiling reports (large files)
+profiles/ncu/
+profiles/csv/
+
+# Cache files
+.cache/
+
+# IDE
+.vscode/
+*.swp
+*.swo

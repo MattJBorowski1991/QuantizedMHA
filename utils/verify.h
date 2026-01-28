@@ -15,3 +15,8 @@ bool verify_results(const std::vector<float>& h_output,
                     const std::vector<float>& ref_output,
                     float epsilon = 1e-3f,
                     float rel_tol = 1e-3f);
+// Save reference output to binary file
+bool save_reference(const std::vector<float>& data, const char* filename, int N, int d_model);
+
+// Load reference output from binary file (returns false if file doesn't exist)
+bool load_reference(std::vector<float>& data, const char* filename, int N, int d_model);

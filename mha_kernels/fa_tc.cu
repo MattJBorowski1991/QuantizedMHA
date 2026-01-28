@@ -21,7 +21,6 @@ __global__ void fa_tc(
     const int d,       // Dimension per head
     const float scale  // softmax_scale
 ) {
-    const int WMMA_M = 16, WMMA_N = 16, WMMA_K = 16;
     const int warp_id = threadIdx.y; 
     const int lane_id = threadIdx.x;
     
@@ -47,8 +46,8 @@ __global__ void fa_tc(
     // Prologue: Load Q (Float->Half)
     int offset_Q = blockIdx.x * Br;
     for (int i = tid; i < Br * d; i += num_threads) {
-        int r = i / d; int c = i % d;
-        sQ[i] = (offset_Q + r < N) ? __float2half(Q[(offset_Q + r)*d + c]) : __float2half(0.0f);
+        int r = i / d;
+        sQ[i] = (offset_Q + r < N) ? __float2half(Q[(offset_Q + r)*d + (i - r*d)]) : __float2half(0.0f);
     }
     
     // Prologue: Load Tile 0 (K, V) -> Buffer 0 using PTX cp.async
@@ -75,7 +74,7 @@ __global__ void fa_tc(
     
     // Convert loaded float data to half
     for (int i = tid; i < Bc * d; i += num_threads) {
-        int r = i / d; int c = i % d;
+        int r = i / d;
         int global_r = 0 * Bc + r;
         if (global_r < N) {
             sK[i] = __float2half(sK_float[i]);
@@ -179,7 +178,7 @@ __global__ void fa_tc(
             __syncthreads();
             
             for (int i = tid; i < Bc * d; i += num_threads) {
-                int r = i / d; int c = i % d;
+                int r = i / d;
                 int global_r = (j + 1) * Bc + r;
                 if (global_r < N) {
                     // Convert async-loaded float to half

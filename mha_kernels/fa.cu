@@ -114,7 +114,6 @@ void launch_fa(
     );
 }
 
-
 extern "C" void solve(const float *Q, const float *K, const float *V, float *output, int N, int d_model, int h)
 {
     auto fa_kernel = [](const float* q_s, const float* k_s, const float* v_s, float* out_s, int N, int d_head, float alpha, cudaStream_t stream, void* aux){

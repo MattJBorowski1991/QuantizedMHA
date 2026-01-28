@@ -6,22 +6,32 @@ High-performance CUDA implementations of FlashAttention-2 with various optimizat
 
 ### 1. Build
 ```bash
-make clean && make NVCC_ARCH=XX
+make clean && make KERNEL=<kernel_name> NVCC_ARCH=XX
 ```
 
-Replace `86` with your target GPU compute capability (e.g., `80` for A100, `89` for RTX 4090, `90` for H100).
+Replace `<kernel_name>` with desired kernel (`unfused`, `fa`, `fa_warps`, `fa_tc`, or `fa_int8`; defaults to `unfused`) and `XX` with your target GPU compute capability (e.g., `80` for A100, `89` for RTX 4090, `90` for H100).
 
-### 2. Run Kernels
+**Note:** For accurate profiling, compile one kernel variant at a time. Each compilation should have its own binary to avoid register allocation changes and ensure clean performance metrics.
+
+### 2. (optional) Verify kernels with reference output
+
+Runs correctness check against CPU reference and caches reference output to `.cache/` for faster subsequent runs. This step is optional but **recommended before profiling** to catch bugs early and pre-compute the reference cache.
+
 ```bash
-./bin/main --kernel=fa --warmup=5 --runs=10
+./bin/profile_fa --warmup=5 --runs=10
 ```
 
-Available kernels: `unfused`, `fa`, `fa_warps`, `fa_tc`, `fa_int8`
+or with kernel selection (note: compiled binary is pre-selected, no need to specify kernel):
+
+```bash
+./bin/profile_fa_int8 --warmup=5 --runs=10
+```
+
+Available binaries: `profile_unfused`, `profile_fa`, `profile_fa_warps`, `profile_fa_tc`, `profile_fa_int8`
 
 Options:
-- `--kernel=<NAME>` - Select kernel to run
-- `--warmup=N` - Number of warmup runs (default: 5)
-- `--runs=N` - Number of profiling runs (default: 10)
+- `--warmup=N` - Number of warmup runs (default: 2)
+- `--runs=N` - Number of profiling runs (default: 3)
 - `--random` - Use random input data instead of constant values
 
 ### 3. Profile with Nsight Compute
@@ -29,7 +39,7 @@ Options:
 Profile with PTX and SASS embedded:
 
 ```bash
-ncu --import-source yes --set full --export profiles/ncu/fa_int8.ncu-rep ./bin/main --kernel=fa_int8 --warmup=5 --runs=10
+ncu --import-source yes --set full --export profiles/ncu/fa.ncu-rep ./bin/profile_fa --kernel=fa --warmup=2 --runs=3
 ```
 
 Export txt and csv summaries:
@@ -42,13 +52,13 @@ Open `.ncu-rep` files directly in Nsight Compute.
 
 ### 4. Debug
 ```bash
-cuda-gdb ./bin/main
-run --kernel=fa_warps
+cuda-gdb ./bin/profile_fa_warps
+run --warmup=5 --runs=10
 ```
 
 Or with cuda-memcheck:
 ```bash
-cuda-memcheck ./bin/main --kernel=fa
+cuda-memcheck ./bin/profile_fa_int8
 ```
 
 

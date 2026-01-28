@@ -3,6 +3,8 @@
 #include <cmath>
 #include <iostream>
 #include <algorithm>
+#include <fstream>
+#include <cstring>
 
 static inline void apply_rope_cpu(float* row, int pos, int d, float base = 10000.0f) {
     // d assumed even
@@ -44,6 +46,13 @@ void cpu_reference(const std::vector<float>& Q, const std::vector<float>& K, con
 
         // For each query position
         for (int i = 0; i < N; ++i) {
+            // Progress display
+            if (i % 512 == 0 || i == N - 1) {
+                float progress = 100.0f * (head * N + i) / (h * N);
+                std::printf("  CPU reference: %.1f%% (head %d/%d, pos %d/%d)\r", progress, head + 1, h, i + 1, N);
+                std::fflush(stdout);
+            }
+
             // load and apply RoPE to q_i
             for (int kk = 0; kk < d_head; ++kk) {
                 q_row[kk] = Q[i * d_model + col_off + kk];
@@ -91,6 +100,54 @@ void cpu_reference(const std::vector<float>& Q, const std::vector<float>& K, con
             }
         }
     }
+    std::printf("\n");
+}
+
+bool save_reference(const std::vector<float>& data, const char* filename, int N, int d_model) {
+    std::ofstream file(filename, std::ios::binary);
+    if (!file) {
+        std::cerr << "Failed to open " << filename << " for writing\n";
+        return false;
+    }
+    
+    // Write metadata
+    file.write(reinterpret_cast<const char*>(&N), sizeof(int));
+    file.write(reinterpret_cast<const char*>(&d_model), sizeof(int));
+    
+    // Write data
+    size_t size = data.size();
+    file.write(reinterpret_cast<const char*>(data.data()), size * sizeof(float));
+    
+    file.close();
+    std::printf("Saved reference output to %s\n", filename);
+    return true;
+}
+
+bool load_reference(std::vector<float>& data, const char* filename, int N, int d_model) {
+    std::ifstream file(filename, std::ios::binary);
+    if (!file) {
+        return false;  // File doesn't exist, will compute instead
+    }
+    
+    // Read and verify metadata
+    int saved_N, saved_d_model;
+    file.read(reinterpret_cast<char*>(&saved_N), sizeof(int));
+    file.read(reinterpret_cast<char*>(&saved_d_model), sizeof(int));
+    
+    if (saved_N != N || saved_d_model != d_model) {
+        std::cerr << "Reference cache mismatch: expected N=" << N << " d_model=" << d_model 
+                  << " but got N=" << saved_N << " d_model=" << saved_d_model << "\n";
+        file.close();
+        return false;
+    }
+    
+    // Read data
+    data.assign(N * d_model, 0.0f);
+    file.read(reinterpret_cast<char*>(data.data()), N * d_model * sizeof(float));
+    file.close();
+    
+    std::printf("Loaded reference output from %s\n", filename);
+    return true;
 }
 
 bool verify_results(const std::vector<float>& h_output, const std::vector<float>& ref_output, float epsilon, float rel_tol){
