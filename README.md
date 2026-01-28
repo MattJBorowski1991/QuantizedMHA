@@ -13,7 +13,7 @@ Replace `<kernel_name>` with desired kernel (`unfused`, `fa`, `fa_warps`, `fa_tc
 
 **Note:** For accurate profiling, compile one kernel variant at a time. Each compilation should have its own binary to avoid register allocation changes and ensure clean performance metrics.
 
-### 2. (optional) Verify kernels with reference output
+### 2. (optional) Verify kernels with reference output and verify initial metrics
 
 Runs correctness check against CPU reference and caches reference output to `.cache/` for faster subsequent runs. This step is optional but **recommended before profiling** to catch bugs early and pre-compute the reference cache.
 
@@ -21,10 +21,16 @@ Runs correctness check against CPU reference and caches reference output to `.ca
 ./bin/profile_fa --warmup=5 --runs=10
 ```
 
-or with kernel selection (note: compiled binary is pre-selected, no need to specify kernel):
+and/or fast profile to verify if initial metrics make sense. Stop early (`Ctrl + C`).
 
 ```bash
-./bin/profile_fa_int8 --warmup=5 --runs=10
+ncu ./bin/profile_fa_int8 --warmup=0 --runs=1
+```
+
+and/or
+
+```bash
+ncu ./bin/profile_fa_tc 2>&1 | head -500 | grep "Elapsed Cycles" | tail -1 | awk '{print $NF}'
 ```
 
 Available binaries: `profile_unfused`, `profile_fa`, `profile_fa_warps`, `profile_fa_tc`, `profile_fa_int8`
@@ -53,12 +59,12 @@ Open `.ncu-rep` files directly in Nsight Compute.
 ### 4. Debug
 ```bash
 cuda-gdb ./bin/profile_fa_warps
-run --warmup=5 --runs=10
+run
 ```
 
-Or with cuda-memcheck:
+Or:
 ```bash
-cuda-memcheck ./bin/profile_fa_int8
+compute-sanitizer ./bin/profile_fa_tc
 ```
 
 

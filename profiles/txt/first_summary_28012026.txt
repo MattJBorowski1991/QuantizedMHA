@@ -1,0 +1,12 @@
+Elapsed cycles of ops: 
+
+(mutual to all mha_kernels)
+3 x Exctract = 3 x 7000 = 21,000
+1 x Concat = 1 x 7000 = 7,000
+
+
+(specific to each of mha_kernels)
+unfused: mma + softmax + mma = 2,550,000 + 400,000 + 2,250,000 = 5,200,000
+fa: 86,000,000 -> 160,000,000 -> 110,000,000 -> 7,200,000
+fa_tc: 6,000,000 -> 110,000,000 -> 6,900,000 -> 5,800,000
+fa_int8: 4,400,000ye

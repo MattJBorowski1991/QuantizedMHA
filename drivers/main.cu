@@ -73,7 +73,7 @@ int main(int argc, char** argv){
 
     // Correctness check before profiling
     {
-        std::printf("Running correctness check with kernel: %s\n", kernel.c_str());
+        std::printf("Running correctness check \n");
         solve(d_Q, d_K, d_V, d_output, N, d_model, h);
         CHECK_CUDA(cudaDeviceSynchronize());
         CHECK_CUDA(cudaMemcpy(h_output.data(), d_output, output_size * sizeof(float), cudaMemcpyDeviceToHost));
