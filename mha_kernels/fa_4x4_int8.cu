@@ -12,11 +12,11 @@
 // implementation yields elapsed cycles of 7,200,000 on L4 for N=4096, d_model=2048, h = 32
 
 // Gameplan for implementing int8: 
-// 1. Dequantize on-the-fly in Q@K^T (matmul_warp_tiled), convert int8 values to float using: (int8_val - zero) * scale during the multiplication loop
-// 2. Handle float *int8 for P@V matmul - Keep softmax probs as float, but dequantize V (int8) on-the-fly when doing P@V
-// 3. Update SRAM layout- less mem needed for int8  
+// 0. Quantize float→int8 preprocessing: convert float inputs to int8 using scale/zero before main kernel
+// 1. Dequantize on-the-fly in Q@K^T
+// 2. Handle float x int8 for P@V matmul
+// 3. Update SRAM layout - less mem needed for int8
 // 4. Unchanged: softmax
-
 
 #define FULL_MASK 0xffffffff
 #define THREADS_PER_WARP 32

@@ -7,18 +7,20 @@ High-performance CUDA implementations of FlashAttention-2 with various optimizat
 ### `unfused.cu` - Unfused Attention Components
 Implements individual operations of attention separately (Q@K^T, softmax, output projection) as standalone kernels rather than fusing them into a single kernel. This modular approach allows flexibility in optimization and profiling of individual attention components.
 
-### `fa.cu` - Standard FlashAttention-2
-A foundational FlashAttention-2 implementation with fused RoPE (Rotary Position Embeddings) that performs single-pass online softmax computation. Each block processes one Q tile with proper per-query-row normalization, using shared memory for efficient Q, K, V tile management.
+### `fa_4x4.cu` - FlashAttention-2
+A foundational FlashAttention-2 implementation with fused RoPE (Rotary Position Embeddings) that performs single-pass online softmax computation. Each block processes one Q tile with proper per-query-row normalization, using shared memory for efficient Q, K, V tile management. Each lane within warp owns a 4x4 minitile of Q in register.
 
-### `fa_warps.cu` - FlashAttention-2 with Warp Specialization
-A variant of FlashAttention-2 that assigns each warp in a block to handle one query row independently. This parallelization strategy uses shared memory efficiently to store multiple Q rows and shared K, V tiles, reducing synchronization overhead.
+### `fa_4x4_int8.cu` - FlashAttention-2 with int8
+Quantization applied to fa_4x4
+0. Quantize float→int8 preprocessing: convert float inputs to int8 using scale/zero before main kernel
+1. Dequantize on-the-fly in Q@K^T
+2. Handle float x int8 for P@V matmul
+3. Update SRAM layout - less mem needed for int8
+4. Unchanged: softmax
 
-### `fa_tc.cu` - FlashAttention-2 with Tensor Cores
-Optimized FlashAttention-2 kernel that leverages NVIDIA Tensor Cores (WMMA) and warp-level specialization for faster matrix operations. Uses half-precision (FP16) computations with double buffering (cp.async) to hide memory latency while maintaining numerical stability through float accumulation.
-
-### `fa_int8.cu` - FlashAttention-2 with Tensor Cores & INT8 Quantization
-Combines Tensor Core acceleration with INT8 quantization to reduce memory footprint and increase throughput. Supports quantization/dequantization with per-tensor scales and zero points for Q, K, V, enabling efficient inference on quantized attention computations.
-
+### `fa_16x4.cu` - FlashAttention-2 with Tensor Cores [WIP]
+Ground work for implementing Tensor Cores with double buffering in Flash Attention. 
+One lane handles a 16x4 mini-tile in register so that one warp can handle a full 16 x d tile of Q.
 
 ## Project Structure
 
