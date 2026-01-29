@@ -136,3 +136,29 @@ Output (float32)
 ```
 
 **Note**: We don't quantize P because it's already a probability (small numbers 0–1).
+
+#### 5.3. Correctness check for d=1024/16=64; Br=64; Bc=32:
+
+(after first K, V tile pair)
+1.1. Q_tile @ K_tile ^T = (64 x 64) x (64 x 32) = (64×32) with all values 64
+1.2. Scale by 1/sqrt(d) = 1/8 => all values 8 == scores
+and sum_exp = 32 x exp(8-8) = 32
+1.3. P_tile = Softmax_rowwise(scores) = (64 x 32) with all values 1/32 
+1.4. P_tile @ V_tile = (64×32) x (32x64) = (64 x 64) with all values 1 = output
+
+(after second K, V tile pair)
+sum_exp = 64
+output = (64 x 64) with all values 2
+
+..
+
+(after 128th K,V tile pair)
+sum_exp = 4096
+output = (64 x 64) with all values 128
+
+=> final output = (64 x 64 with all values) 128 / 4096
+
+
+
+
+
