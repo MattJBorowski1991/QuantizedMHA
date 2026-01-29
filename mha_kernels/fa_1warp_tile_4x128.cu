@@ -5,22 +5,18 @@
 #include "../include/launchers.h"
 #include "../utils/utils.cu"
 
-// TODO1 profile in NCU and optimize softmax so that elapsed cycles drop from 13.5m to c.a. 5m (results for unfused)
-// TODO2 implement TC WMMA
-// TODO3 implement Double Buffering
-
-// Flash attention with Warp-level tiled matmul
-// One warp handles 16 rows of Q, so that we can prepare the kernel to using TC WMMA (need 16x16 tiles)
-// Since its best to have 4-8 warps per block => Br = 64 (or even better 128)
-// for Br=Bc=64 and N=4096, d = 2048 the kernel fails silently due to SRAM overflow
-// hence we set Br = 64, Bc = 32
+// Flash attention with Warp-level tiled matmul 
+// 4x4 register-level tile per lane => 4 x 128 chunk per warp which is warp-strided for all columns of Q
+// for this reason Q needs to have 128 columns (or mulitple of 128) for this to be most efficient solution
+// implementation yields elapsed cycles of 7,200,000 on L4 for N=4096, d_model=2048, h = 32
+// left for reference as it is not possible to build on it to implement TC WMMA (need 16 x d tile per warp)
 
 #define FULL_MASK 0xffffffff
 #define THREADS_PER_WARP 32
 
 // Shared memory block matrix multiply (warp-tiled with register blocking)
-// Each warp: 16 rows, each lane (32 lanes): 4 columns
-// Accumulates 16x4 tiles into registers
+// Each warp: 4 rows, each lane (32 lanes): 4 columns per iteration
+// Accumulates into registers
 template <bool add_to_output = false>
 __device__ void matmul_warp_tiled(
     const float* mat_a,      // num_rows x num_shared_dim
@@ -36,49 +32,43 @@ __device__ void matmul_warp_tiled(
     int num_threads = blockDim.x;
     int num_warps = num_threads / THREADS_PER_WARP;
 
-    constexpr int warp_rows = 16;
-    constexpr int reg_tile_rows = 16;
-    constexpr int reg_tile_cols = 4;
+    constexpr int TILE_SIZE = 4;
     
-    // Each warp handles warp_rows (16) rows
-    for (int row_start = warp_rows * warp_id; row_start < num_rows; row_start += num_warps * warp_rows) {
-        int row_count = min(warp_rows, num_rows - row_start);
+    // Each warp handles TILE_SIZE rows
+    for (int row_start = TILE_SIZE * warp_id; row_start < num_rows; row_start += num_warps * TILE_SIZE) {
+        int row_count = min(TILE_SIZE, num_rows - row_start);
         
-        // Each lane handles reg_tile_cols (4) columns
-        for (int col_start = reg_tile_cols * lane_id; col_start < num_cols; col_start += THREADS_PER_WARP * reg_tile_cols) {
-            int col_count = min(reg_tile_cols, num_cols - col_start);
+        // Each lane handles TILE_SIZE columns
+        for (int col_start = TILE_SIZE * lane_id; col_start < num_cols; col_start += THREADS_PER_WARP * TILE_SIZE) {
+            int col_count = min(TILE_SIZE, num_cols - col_start);
             
-            // Register accumulator (16x4)
-            float acc[reg_tile_rows * reg_tile_cols];
+            // Register accumulator (4x4)
+            float acc[TILE_SIZE * TILE_SIZE];
             #pragma unroll
-            for (int i = 0; i < reg_tile_rows * reg_tile_cols; i++) acc[i] = 0.0f;
+            for (int i = 0; i < TILE_SIZE * TILE_SIZE; i++) acc[i] = 0.0f;
             
             // Dot product loop
             for (int k_idx = 0; k_idx < num_shared_dim; k_idx++) {
-                // Load A tile rows (all 16 rows for this lane)
-                float a_vals[reg_tile_rows];
+                // Load A tile row
+                float a_vals[TILE_SIZE];
                 #pragma unroll
-                for (int i = 0; i < reg_tile_rows; i++) {
-                    if (row_start + i < num_rows) {
-                        a_vals[i] = mat_a[(row_start + i) * num_shared_dim + k_idx];
-                    } else {
-                        a_vals[i] = 0.0f;
-                    }
+                for (int i = 0; i < TILE_SIZE; i++) {
+                    a_vals[i] = mat_a[(row_start + i) * num_shared_dim + k_idx];
                 }
                 
-                // Load B tile columns (4 columns)
-                float b_vals[reg_tile_cols];
+                // Load B tile column
+                float b_vals[TILE_SIZE];
                 #pragma unroll
-                for (int j = 0; j < reg_tile_cols; j++) {
+                for (int j = 0; j < TILE_SIZE; j++) {
                     b_vals[j] = mat_b[k_idx * num_cols + col_start + j];
                 }
                 
                 // Outer product
                 #pragma unroll
-                for (int i = 0; i < reg_tile_rows; i++) {
+                for (int i = 0; i < TILE_SIZE; i++) {
                     #pragma unroll
-                    for (int j = 0; j < reg_tile_cols; j++) {
-                        acc[i * reg_tile_cols + j] += a_vals[i] * b_vals[j];
+                    for (int j = 0; j < TILE_SIZE; j++) {
+                        acc[i * TILE_SIZE + j] += a_vals[i] * b_vals[j];
                     }
                 }
             }
@@ -89,9 +79,9 @@ __device__ void matmul_warp_tiled(
                 #pragma unroll
                 for (int j = 0; j < col_count; j++) {
                     if constexpr (add_to_output) {
-                        mat_c[(row_start + i) * num_cols + (col_start + j)] += acc[i * reg_tile_cols + j];
+                        mat_c[(row_start + i) * num_cols + (col_start + j)] += acc[i * TILE_SIZE + j];
                     } else {
-                        mat_c[(row_start + i) * num_cols + (col_start + j)] = acc[i * reg_tile_cols + j];
+                        mat_c[(row_start + i) * num_cols + (col_start + j)] = acc[i * TILE_SIZE + j];
                     }
                 }
             }
@@ -118,55 +108,46 @@ __device__ void online_softmax_and_accum_output(
     int num_threads = blockDim.x;
     int num_warps = num_threads / THREADS_PER_WARP;
 
-    constexpr int warp_rows = 16;
-    
-    // Process warp_rows consecutive rows per warp
-    for (int row_start = warp_rows * warp_id; row_start < q_block_size; row_start += num_warps * warp_rows) {
-        int row_count = min(warp_rows, q_block_size - row_start);
+    // Process one query row per warp
+    for (int q_row = warp_id; q_row < q_block_size; q_row += num_warps) {
+        // Step 1: Find max in this KV block's scores for this query row and scale by 1/sqrt(d)
+        float max_new = max_prev[q_row];
+        for (int kv_col = lane_id; kv_col < kv_block_size; kv_col += THREADS_PER_WARP) {
+            float score_scaled = scores[q_row * kv_block_size + kv_col] / sqrt_head_dim;
+            max_new = fmaxf(max_new, score_scaled);
+            scores[q_row * kv_block_size + kv_col] = score_scaled;
+        }
         
-        // Process each row assigned to this warp
-        for (int row_idx = 0; row_idx < row_count; row_idx++) {
-            int q_row = row_start + row_idx;
-            
-            // Step 1: Find max in this KV block's scores for this query row and scale by 1/sqrt(d)
-            float max_new = max_prev[q_row];
-            for (int kv_col = lane_id; kv_col < kv_block_size; kv_col += THREADS_PER_WARP) {
-                float score_scaled = scores[q_row * kv_block_size + kv_col] / sqrt_head_dim;
-                max_new = fmaxf(max_new, score_scaled);
-                scores[q_row * kv_block_size + kv_col] = score_scaled;
-            }
-            
-            // Warp reduction to get global max for this query row
-            #pragma unroll
-            for (int shift = THREADS_PER_WARP / 2; shift >= 1; shift >>= 1) {
-                max_new = fmaxf(max_new, __shfl_xor_sync(FULL_MASK, max_new, shift));
-            }
+        // Warp reduction to get global max for this query row
+        #pragma unroll
+        for (int shift = THREADS_PER_WARP / 2; shift >= 1; shift >>= 1) {
+            max_new = fmaxf(max_new, __shfl_xor_sync(FULL_MASK, max_new, shift));
+        }
 
-            // Step 2: Compute exp(score - max) and accumulate sum with warp reduction
-            float sum_new = 0.0f;
-            for (int kv_col = lane_id; kv_col < kv_block_size; kv_col += THREADS_PER_WARP) {
-                float prob = expf(scores[q_row * kv_block_size + kv_col] - max_new);
-                scores[q_row * kv_block_size + kv_col] = prob;  // Store softmax prob back
-                sum_new += prob;
-            }
-            
-            // Warp reduction to get global sum
-            #pragma unroll
-            for (int shift = THREADS_PER_WARP / 2; shift >= 1; shift >>= 1) {
-                sum_new += __shfl_xor_sync(FULL_MASK, sum_new, shift);
-            }
+        // Step 2: Compute exp(score - max) and accumulate sum with warp reduction
+        float sum_new = 0.0f;
+        for (int kv_col = lane_id; kv_col < kv_block_size; kv_col += THREADS_PER_WARP) {
+            float prob = expf(scores[q_row * kv_block_size + kv_col] - max_new);
+            scores[q_row * kv_block_size + kv_col] = prob;  // Store softmax prob back
+            sum_new += prob;
+        }
+        
+        // Warp reduction to get global sum
+        #pragma unroll
+        for (int shift = THREADS_PER_WARP / 2; shift >= 1; shift >>= 1) {
+            sum_new += __shfl_xor_sync(FULL_MASK, sum_new, shift);
+        }
 
-            // Step 3: Update max and sum statistics (only first lane writes)
-            float exp_max_diff = expf(max_prev[q_row] - max_new);
-            if (lane_id == 0) {
-                max_cur[q_row] = max_new;
-                sum_exp[q_row] = exp_max_diff * sum_exp[q_row] + sum_new;
-            }
-            
-            // Step 4: Rescale output accumulator by exp(max_old - max_new)
-            for (int d_idx = lane_id; d_idx < head_dim; d_idx += THREADS_PER_WARP) {
-                output[q_row * head_dim + d_idx] *= exp_max_diff;
-            }
+        // Step 3: Update max and sum statistics (only first lane writes)
+        float exp_max_diff = expf(max_prev[q_row] - max_new);
+        if (lane_id == 0) {
+            max_cur[q_row] = max_new;
+            sum_exp[q_row] = exp_max_diff * sum_exp[q_row] + sum_new;
+        }
+        
+        // Step 4: Rescale output accumulator by exp(max_old - max_new)
+        for (int d_idx = lane_id; d_idx < head_dim; d_idx += THREADS_PER_WARP) {
+            output[q_row * head_dim + d_idx] *= exp_max_diff;
         }
     }
     

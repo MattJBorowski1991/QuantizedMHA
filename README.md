@@ -2,6 +2,34 @@
 
 High-performance CUDA implementations of FlashAttention-2 with various optimizations including quantization, Tensor Cores acceleration, and warp specialization.
 
+## Kernels
+
+### `unfused.cu` - Unfused Attention Components
+Implements individual operations of attention separately (Q@K^T, softmax, output projection) as standalone kernels rather than fusing them into a single kernel. This modular approach allows flexibility in optimization and profiling of individual attention components.
+
+### `fa.cu` - Standard FlashAttention-2
+A foundational FlashAttention-2 implementation with fused RoPE (Rotary Position Embeddings) that performs single-pass online softmax computation. Each block processes one Q tile with proper per-query-row normalization, using shared memory for efficient Q, K, V tile management.
+
+### `fa_warps.cu` - FlashAttention-2 with Warp Specialization
+A variant of FlashAttention-2 that assigns each warp in a block to handle one query row independently. This parallelization strategy uses shared memory efficiently to store multiple Q rows and shared K, V tiles, reducing synchronization overhead.
+
+### `fa_tc.cu` - FlashAttention-2 with Tensor Cores
+Optimized FlashAttention-2 kernel that leverages NVIDIA Tensor Cores (WMMA) and warp-level specialization for faster matrix operations. Uses half-precision (FP16) computations with double buffering (cp.async) to hide memory latency while maintaining numerical stability through float accumulation.
+
+### `fa_int8.cu` - FlashAttention-2 with Tensor Cores & INT8 Quantization
+Combines Tensor Core acceleration with INT8 quantization to reduce memory footprint and increase throughput. Supports quantization/dequantization with per-tensor scales and zero points for Q, K, V, enabling efficient inference on quantized attention computations.
+
+
+## Project Structure
+
+- **`mha_kernels/`** - Core attention kernel implementations
+- **`extensions/`** - Language bindings (JAX, PyTorch)
+- **`tests/`** - Device-side unit tests for kernels
+- **`profiling/`** - Profiling tools and scripts
+- **`examples/`** - Example usage scripts
+- **`include/`** - Header files and configuration
+- **`utils/`** - Utility functions and verification code
+
 ## Usage
 
 ### 1. Build
@@ -67,31 +95,44 @@ Or:
 compute-sanitizer ./bin/profile_fa_tc
 ```
 
+### 5. Notes
 
-## Kernels
+#### 5.1. Shared memory in `fa.cu`
+Requires `(4 * max(Br*Bc, Bc*d) + 3*Br) * sizeof(float)` which equals:
+- **Br=128**: ~264KB (exceeds 96KB GPU limit)
+- **Br=64**: ~66KB (tight, may fail)
+- **Br=32**: ~33KB (fits safely)
 
-### `unfused.cu` - Unfused Attention Components
-Implements individual operations of attention separately (Q@K^T, softmax, output projection) as standalone kernels rather than fusing them into a single kernel. This modular approach allows flexibility in optimization and profiling of individual attention components.
+In case of SRAM overflow the kernel will either fail silently or generate incorrect code.
 
-### `fa.cu` - Standard FlashAttention-2
-A foundational FlashAttention-2 implementation with fused RoPE (Rotary Position Embeddings) that performs single-pass online softmax computation. Each block processes one Q tile with proper per-query-row normalization, using shared memory for efficient Q, K, V tile management.
+#### 5.2. Warps in FA2 and TC WMMA
 
-### `fa_warps.cu` - FlashAttention-2 with Warp Specialization
-A variant of FlashAttention-2 that assigns each warp in a block to handle one query row independently. This parallelization strategy uses shared memory efficiently to store multiple Q rows and shared K, V tiles, reducing synchronization overhead.
+- If based on fa.cu we want to implement correct TC WMMA in fa_tc.cu, we need 16×16 tiles in Q, K, V to be served by one warp.
 
-### `fa_tc.cu` - FlashAttention-2 with Tensor Cores
-Optimized FlashAttention-2 kernel that leverages NVIDIA Tensor Cores (WMMA) and warp-level specialization for faster matrix operations. Uses half-precision (FP16) computations with double buffering (cp.async) to hide memory latency while maintaining numerical stability through float accumulation.
+- In the beginning in fa.cu one warp owns (warp_rows × d) = (4 × d) of Q and does a warp-stride across all columns d to calculate the matmuls, online softmax and final per-row scaled dot product.
 
-### `fa_int8.cu` - FlashAttention-2 with Tensor Cores & INT8 Quantization
-Combines Tensor Core acceleration with INT8 quantization to reduce memory footprint and increase throughput. Supports quantization/dequantization with per-tensor scales and zero points for Q, K, V, enabling efficient inference on quantized attention computations.
+- For this reason warp_rows needs to be a multiple of 16, let's take warp_rows = 16.
+
+- If warp_rows = 16, then Br has to be a multiple of warp_rows:
+
+For N = 4096, d = 2048, h = 32:
+- **Br=32**: 2 warps per block, ~33KB shared mem ✓
+- **Br=48**: 3 warps per block, ~50KB shared mem ✓
+- **Br=64**: 4 warps per block, ~66KB shared mem (kernel fails silently) ✗
 
 
-## Project Structure
+#### 5.3. Quantization Workflow
 
-- **`mha_kernels/`** - Core attention kernel implementations
-- **`extensions/`** - Language bindings (JAX, PyTorch)
-- **`tests/`** - Device-side unit tests for kernels
-- **`profiling/`** - Profiling tools and scripts
-- **`examples/`** - Example usage scripts
-- **`include/`** - Header files and configuration
-- **`utils/`** - Utility functions and verification code
+```
+Inputs (float32)
+  ↓ [Pre-quantize]
+Q, K, V (int8)
+  ↓ [QK^T: int8 @ int8]
+Scores (float32 after upcast)
+  ↓ [Softmax]
+Probs (float32)
+  ↓ [P @ V: float32 @ int8]
+Output (float32)
+```
+
+**Note**: We don't quantize P because it's already a probability (small numbers 0–1).

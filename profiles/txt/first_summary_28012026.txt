@@ -7,6 +7,6 @@ Elapsed cycles of ops:
 
 (specific to each of mha_kernels)
 unfused: mma + softmax + mma = 2,550,000 + 400,000 + 2,250,000 = 5,200,000
-fa: 86,000,000 -> 160,000,000 -> 110,000,000 -> 7,200,000
-fa_tc: 6,000,000 -> 110,000,000 -> 6,900,000 -> 5,800,000
-fa_int8: 4,400,000ye
+fa: 13,500,000  (one lane handles 16x4) [WIP towards TC WMMA]
+fa_1warp_tile_4x128: 8,000,000 (one lane handles 4x4)
+fa_int8: 9,400,000
