@@ -2,15 +2,24 @@
 
 High-performance CUDA implementations of FlashAttention-2 with various optimizations including quantization, Tensor Cores acceleration, and warp specialization.
 
+## Performance Highlights
+
+- **Unfused baseline**: 6.44 ms total (3 kernels: Q@K^T, softmax, P@V)
+- **FA_4X4**: 9.07 ms (1 fused kernel, currently occupancy-limited at 37%)
+- **High occupancy unfused**: 87–100% SM utilization with 65,536 blocks
+- **Identified optimizations**: 53% potential speedup via bank conflict reduction, 44% via occupancy improvements
+
+For detailed profiling analysis, see [Profiling Results](#profiling-results) below.
+
 ## Kernels
 
 ### `unfused.cu` - Unfused Attention Components
 Implements individual operations of attention separately (Q@K^T, softmax, output projection) as standalone kernels rather than fusing them into a single kernel. This modular approach allows flexibility in optimization and profiling of individual attention components.
 
 ### `fa_4x4.cu` - FlashAttention-2
-A foundational FlashAttention-2 implementation with fused RoPE (Rotary Position Embeddings) that performs single-pass online softmax computation. Each block processes one Q tile with proper per-query-row normalization, using shared memory for efficient Q, K, V tile management. Each lane within warp owns a 4x4 minitile of Q in register.
+A foundational FlashAttention-2 implementation with fused RoPE (Rotary Position Embeddings) that performs single-pass online softmax computation. Each block processes one Q tile with proper per-query-row normalization, using shared memory for efficient Q, K, V tile management. Each lane within warp owns a 4x4 minitile of Q in a register.
 
-### `fa_4x4_int8.cu` - FlashAttention-2 with int8
+### `fa_4x4_int8.cu` - FlashAttention-2 with int8 [WIP]
 Quantization applied to fa_4x4
 0. Quantize float→int8 preprocessing: convert float inputs to int8 using scale/zero before main kernel
 1. Dequantize on-the-fly in Q@K^T
@@ -39,7 +48,7 @@ One lane handles a 16x4 mini-tile in register so that one warp can handle a full
 make clean && make KERNEL=<kernel_name> NVCC_ARCH=XX
 ```
 
-Replace `<kernel_name>` with desired kernel (`unfused`, `fa`, `fa_warps`, `fa_tc`, or `fa_int8`; defaults to `unfused`) and `XX` with your target GPU compute capability (e.g., `80` for A100, `89` for RTX 4090, `90` for H100).
+Replace `<kernel_name>` with desired kernel (`unfused`, `fa`, `fa_warps`, `fa_tc`; defaults to `unfused`). **Note:** `fa_int8` is pending and not yet available.
 
 **Note:** For accurate profiling, compile one kernel variant at a time. Each compilation should have its own binary to avoid register allocation changes and ensure clean performance metrics.
 
@@ -63,7 +72,7 @@ and/or
 ncu ./bin/profile_fa_tc 2>&1 | head -500 | grep "Elapsed Cycles" | tail -1 | awk '{print $NF}'
 ```
 
-Available binaries: `profile_unfused`, `profile_fa`, `profile_fa_warps`, `profile_fa_tc`, `profile_fa_int8`
+Available binaries: `profile_unfused`, `profile_fa`, `profile_fa_warps`, `profile_fa_tc` (note: `profile_fa_int8` pending)
 
 Options:
 - `--warmup=N` - Number of warmup runs (default: 2)
@@ -160,7 +169,36 @@ output = (64 x 64) with all values 128
 
 => final output = (64 x 64 with all values) 128 / 4096
 
+---
 
+## Profiling Results
 
+Detailed profiling analysis via Nsight Compute, comparing kernel performance across unfused vs fused attention implementations.
 
+### Run 1: Unfused vs FA_4X4 Baseline
 
+**Summary**: Comparative profiling of three unfused attention components (`mma_A_Bt`, `softmax`, `mma_A_B`) and the fused FA_4X4 implementation.
+
+**Key Findings**:
+- **Unfused total latency**: 6.44 ms (3 kernels)
+- **FA_4X4 latency**: 9.07 ms (1 kernel, 1.4× slower)
+- **Occupancy**: Unfused 87–100%, FA_4X4 only 37%
+- **Grid utilization**: Unfused 65,536 blocks, FA_4X4 only 64 blocks
+- **Root cause**: FA_4X4 limited by register pressure (64 regs/thread) and large SRAM (102 KB)
+
+**Top Optimization Opportunities**:
+1. **Shared store bank conflicts** (est. speedup 53%) — 68.56% of stores affected
+2. **Achieved occupancy** (est. speedup 44%) — 37% vs 67% theoretical
+3. **Theoretical occupancy** (est. speedup 33%) — register and SRAM limits
+
+**High-level comparison**: [profiles/txt/run1/run1_ncu_highlevel.txt](profiles/txt/run1/run1_ncu_highlevel.txt)
+
+**Full Analysis**: [profiles/txt/run1/run1_ncu_details.txt](profiles/txt/run1/run1_ncu_details.txt)
+
+### Run 2: Pending Optimizations in the Flash Attention Kernel
+
+**Status**: TBD — focused on addressing the identified bottlenecks from Run 1:
+- Fixing non-coalesced shared memory access patterns (transposed K tile store)
+- Reducing register pressure and SRAM footprint
+- Improving warp distribution and occupancy
+- Aligning matmul and softmax warp work divisions

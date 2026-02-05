@@ -11,36 +11,37 @@
 // implementation yields elapsed cycles of 7,200,000 on L4 for N=4096, d_model=2048, h = 32
 // left for reference as it is not possible to build on it to implement TC WMMA (need 16 x d tile per warp)
 
-#define FULL_MASK 0xffffffff
 #define THREADS_PER_WARP 32
+#define WARPS_PER_BLOCK 16
+#define FULL_MASK 0xffffffff
 
 // Shared memory block matrix multiply (warp-tiled with register blocking)
 // Each warp: 4 rows, each lane (32 lanes): 4 columns per iteration
 // Accumulates into registers
-template <bool add_to_output = false>
-__device__ void matmul_warp_tiled(
-    const float* mat_a,      // num_rows x num_shared_dim
-    const float* mat_b,      // num_shared_dim x num_cols
-    float* mat_c,            // num_rows x num_cols
-    int num_rows,
-    int num_cols,
-    int num_shared_dim
+template <bool add_to_output = false, int THREADS>
+__device__ __forceinline__ void matmul_warp_tiled(
+    const float* A,      // M x K
+    const float* B,      // K x N
+    float* C,        // M x N
+    int M,
+    int N,
+    int K
 ) {
+    constexpr int TILE_SIZE = 4;
+    
+    // Require dimensions to be multiples of TILE_SIZE for optimal unrolling
+    assert(M % TILE_SIZE == 0 && "M must be a multiple of TILE_SIZE");
+    assert(N % TILE_SIZE == 0 && "N must be a multiple of TILE_SIZE");
+    assert(K % TILE_SIZE == 0 && "K must be a multiple of TILE_SIZE");
+    
     int tid = threadIdx.x;
     int warp_id = tid / 32;
     int lane_id = tid % 32;
-    int num_threads = blockDim.x;
-    int num_warps = num_threads / THREADS_PER_WARP;
-
-    constexpr int TILE_SIZE = 4;
     
     // Each warp handles TILE_SIZE rows
-    for (int row_start = TILE_SIZE * warp_id; row_start < num_rows; row_start += num_warps * TILE_SIZE) {
-        int row_count = min(TILE_SIZE, num_rows - row_start);
-        
+    for (int row_start = TILE_SIZE * warp_id; row_start < M; row_start += WARPS_PER_BLOCK * TILE_SIZE) {
         // Each lane handles TILE_SIZE columns
-        for (int col_start = TILE_SIZE * lane_id; col_start < num_cols; col_start += THREADS_PER_WARP * TILE_SIZE) {
-            int col_count = min(TILE_SIZE, num_cols - col_start);
+        for (int col_start = TILE_SIZE * lane_id; col_start < N; col_start += THREADS_PER_WARP * TILE_SIZE) {
             
             // Register accumulator (4x4)
             float acc[TILE_SIZE * TILE_SIZE];
@@ -48,19 +49,19 @@ __device__ void matmul_warp_tiled(
             for (int i = 0; i < TILE_SIZE * TILE_SIZE; i++) acc[i] = 0.0f;
             
             // Dot product loop
-            for (int k_idx = 0; k_idx < num_shared_dim; k_idx++) {
+            for (int k_idx = 0; k_idx < K; k_idx++) {
                 // Load A tile row
                 float a_vals[TILE_SIZE];
                 #pragma unroll
                 for (int i = 0; i < TILE_SIZE; i++) {
-                    a_vals[i] = mat_a[(row_start + i) * num_shared_dim + k_idx];
+                    a_vals[i] = A[(row_start + i) * K + k_idx];
                 }
                 
                 // Load B tile column
                 float b_vals[TILE_SIZE];
                 #pragma unroll
                 for (int j = 0; j < TILE_SIZE; j++) {
-                    b_vals[j] = mat_b[k_idx * num_cols + col_start + j];
+                    b_vals[j] = B[k_idx * N + col_start + j];
                 }
                 
                 // Outer product
@@ -75,13 +76,13 @@ __device__ void matmul_warp_tiled(
             
             // Store to C
             #pragma unroll
-            for (int i = 0; i < row_count; i++) {
+            for (int i = 0; i < TILE_SIZE; i++) {
                 #pragma unroll
-                for (int j = 0; j < col_count; j++) {
+                for (int j = 0; j < TILE_SIZE; j++) {
                     if constexpr (add_to_output) {
-                        mat_c[(row_start + i) * num_cols + (col_start + j)] += acc[i * TILE_SIZE + j];
+                        C[(row_start + i) * N + (col_start + j)] += acc[i * TILE_SIZE + j];
                     } else {
-                        mat_c[(row_start + i) * num_cols + (col_start + j)] = acc[i * TILE_SIZE + j];
+                        C[(row_start + i) * N + (col_start + j)] = acc[i * TILE_SIZE + j];
                     }
                 }
             }
@@ -89,33 +90,38 @@ __device__ void matmul_warp_tiled(
     }
 }
 
+// TODO: one warp handles 1 row but should be handling 4 rows like in matmul_warp_tiled
+// TODO: otherwise perf deficiencies: 
+// (i) bank conflicts,
+// (ii) poor cache locality - (softmax warp 0 computes row 0, matmul warp 0 reads rows 0-3 from different cache lines)
+// (iii) load imbalance (some warps may finish earlier than others)
+
 // Online softmax: scale scores, find max, compute softmax probs, update statistics, rescale output, accumulate O += P @ V
-__device__ void online_softmax_and_accum_output(
+template<int THREADS>
+__device__ __forceinline__ void online_softmax_and_accum_output(
     float* max_cur,
     const float* max_prev,
     float* sum_exp,
-    float* scores,     // Will be overwritten with softmax probs
+    float* scores,     // to be overwritten with softmax probs
     float* output,
-    const float* values, // V (kv_block_size x head_dim)
-    int q_block_size,
-    int kv_block_size,
+    const float* values, // V (Bc x head_dim)
+    int Br,
+    int Bc,
     int head_dim,
-    float sqrt_head_dim
+    float sqrt_d
 ) {
     int tid = threadIdx.x;
     int warp_id = tid / 32;
     int lane_id = tid % 32;
-    int num_threads = blockDim.x;
-    int num_warps = num_threads / THREADS_PER_WARP;
 
     // Process one query row per warp
-    for (int q_row = warp_id; q_row < q_block_size; q_row += num_warps) {
+    for (int q_row = warp_id; q_row < Br; q_row += WARPS_PER_BLOCK) {
         // Step 1: Find max in this KV block's scores for this query row and scale by 1/sqrt(d)
         float max_new = max_prev[q_row];
-        for (int kv_col = lane_id; kv_col < kv_block_size; kv_col += THREADS_PER_WARP) {
-            float score_scaled = scores[q_row * kv_block_size + kv_col] / sqrt_head_dim;
+        for (int kv_col = lane_id; kv_col < Bc; kv_col += THREADS_PER_WARP) {
+            float score_scaled = scores[q_row * Bc + kv_col] / sqrt_d;
             max_new = fmaxf(max_new, score_scaled);
-            scores[q_row * kv_block_size + kv_col] = score_scaled;
+            scores[q_row * Bc + kv_col] = score_scaled;
         }
         
         // Warp reduction to get global max for this query row
@@ -126,9 +132,9 @@ __device__ void online_softmax_and_accum_output(
 
         // Step 2: Compute exp(score - max) and accumulate sum with warp reduction
         float sum_new = 0.0f;
-        for (int kv_col = lane_id; kv_col < kv_block_size; kv_col += THREADS_PER_WARP) {
-            float prob = expf(scores[q_row * kv_block_size + kv_col] - max_new);
-            scores[q_row * kv_block_size + kv_col] = prob;  // Store softmax prob back
+        for (int kv_col = lane_id; kv_col < Bc; kv_col += THREADS_PER_WARP) {
+            float prob = expf(scores[q_row * Bc + kv_col] - max_new);
+            scores[q_row * Bc + kv_col] = prob;  // Store softmax prob back
             sum_new += prob;
         }
         
@@ -154,10 +160,10 @@ __device__ void online_softmax_and_accum_output(
     __syncthreads();
     
     // Step 5: Accumulate O += (softmax probs) @ V
-    matmul_warp_tiled<true>(scores, values, output, q_block_size, head_dim, kv_block_size);
+    matmul_warp_tiled<true>(scores, values, output, Br, head_dim, Bc);
 }
 
-template<int Br, int Bc>
+template<int Br, int Bc, int THREADS>
 __global__ void fa_kernel(
     const float* Q,    // [N, d]
     const float* K,    // [N, d]
@@ -170,11 +176,11 @@ __global__ void fa_kernel(
     // One block per Br Q-rows
     const int q_block_idx = blockIdx.x;
     const int tid = threadIdx.x;
-    const int num_threads = blockDim.x;
 
     // Compute allocation sizes
     int alloc_size = max(Br * Bc, Bc * d);
     
+    // TODO fix alloc sizes below
     // Shared memory layout
     extern __shared__ float shared_mem[];
     float *output = shared_mem;                      // [Br x d]
@@ -191,7 +197,7 @@ __global__ void fa_kernel(
     int q_rows = min(Br, N - q_block_idx * Br);
     
     // Load Q block
-    for (int idx = tid; idx < Br * d; idx += num_threads) {
+    for (int idx = tid; idx < Br * d; idx += THREADS) {
         int row = idx / d;
         int col = idx % d;
         if (q_block_idx * Br + row < N) {
@@ -202,10 +208,10 @@ __global__ void fa_kernel(
     }
     
     // Initialize output, statistics
-    for (int idx = tid; idx < q_rows * d; idx += num_threads) {
+    for (int idx = tid; idx < q_rows * d; idx += THREADS) {
         output[idx] = 0.0f;
     }
-    for (int idx = tid; idx < q_rows; idx += num_threads) {
+    for (int idx = tid; idx < q_rows; idx += THREADS) {
         sum_exp[idx] = 0.0f;
         max_prev[idx] = -INFINITY;
     }
@@ -217,12 +223,11 @@ __global__ void fa_kernel(
         int kv_rows = min(Bc, N - kv_block_idx * Bc);
         
         // Load K (transposed)
-        for (int idx = tid; idx < Bc * d; idx += num_threads) {
+        for (int idx = tid; idx < Bc * d; idx += THREADS) {
             int row = idx / d;
             int col = idx % d;
             int k_idx = kv_block_idx * Bc + row;
             if (k_idx < N) {
-                // Store transposed: kv_block[col * Bc + row] = K[k_idx * d + col]
                 kv_block[col * Bc + row] = K[k_idx * d + col];
             } else {
                 kv_block[col * Bc + row] = 0.0f;
@@ -235,7 +240,7 @@ __global__ void fa_kernel(
         __syncthreads();
         
         // Load V
-        for (int idx = tid; idx < Bc * d; idx += num_threads) {
+        for (int idx = tid; idx < Bc * d; idx += THREADS) {
             int row = idx / d;
             int col = idx % d;
             int k_idx = kv_block_idx * Bc + row;
@@ -253,13 +258,14 @@ __global__ void fa_kernel(
         __syncthreads();
         
         // Swap statistics pointers for next iteration
-        float* tmp = max_prev;
-        max_prev = max_cur_ptr;
-        max_cur_ptr = tmp;
+        float* tmp = max_prev; max_prev = max_cur_ptr; max_cur_ptr = tmp;
     }
 
+    // TODO: above one warp handles one row and below we do a block-stride across the full Q_block?
+    // TODO: for d > THREADS below we do the same thing with multiple loop iterations
+
     // Epilogue: normalize output and write to global memory
-    for (int idx = tid; idx < q_rows * d; idx += num_threads) {
+    for (int idx = tid; idx < q_rows * d; idx += THREADS) {
         int row = idx / d;
         if (sum_exp[row] > 0.0f) {
             output[idx] /= sum_exp[row];
@@ -268,7 +274,7 @@ __global__ void fa_kernel(
     __syncthreads();
     
     // Store to global memory
-    for (int idx = tid; idx < q_rows * d; idx += num_threads) {
+    for (int idx = tid; idx < q_rows * d; idx += THREADS) {
         int row = idx / d;
         int col = idx % d;
         if (q_block_idx * Br + row < N) {
@@ -277,31 +283,21 @@ __global__ void fa_kernel(
     }
 }
 
-template<int Br, int Bc>
-void launch_fa(
-    const float *Q, const float *K, const float *V,
-    float *O,
-    int N, int d,
-    float alpha,
-    cudaStream_t stream = 0
-)
+template<int Br, int Bc, int THREADS>
+void launch_fa(const float *Q, const float *K, const float *V, float *O, int N, int d, float alpha, cudaStream_t stream = 0)
 {
-    int num_blocks = (N + Br - 1) / Br;
+    int BLOCKS = (N + Br - 1) / Br;
     int alloc_size = max(Br * Bc, Bc * d);
-    size_t shared_mem = (4 * alloc_size + 3 * Br) * sizeof(float);
-    
-    int threads_per_block = 512;
-    
-    fa_kernel<Br, Bc><<<num_blocks, threads_per_block, shared_mem, stream>>>(
-        Q, K, V, O, N, d, alpha
-    );
+    size_t shared_mem = (4 * alloc_size + 3 * Br) * sizeof(float);      
+    fa_kernel<Br, Bc, THREADS><<<BLOCKS, THREADS, shared_mem, stream>>>(Q, K, V, O, N, d, alpha);
 }
 
 extern "C" void solve(const float *Q, const float *K, const float *V, float *output, int N, int d_model, int h)
-{
+{   
+    constexpr int THREADS = 512;
     auto fa_kernel = [](const float* q_s, const float* k_s, const float* v_s, float* out_s, int N, int d_head, float alpha, cudaStream_t stream, void* aux){
         (void)aux;
-        launch_fa<Br, Bc>(q_s, k_s, v_s, out_s, N, d_head, alpha, stream);
+        launch_fa<Br, Bc, THREADS>(q_s, k_s, v_s, out_s, N, d_head, alpha, stream);
     };
     launch(Q, K, V, output, N, d_model, h, fa_kernel, 0);
 }
