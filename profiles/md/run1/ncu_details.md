@@ -83,7 +83,7 @@ Although eligible and issued warps increased, performance did not improve:
 
 ![Warps per Scheduler](../../images/run1/fa_4x4_warps_per_scheduler.png)
 
-Warp state statistics deteriorated across the board:
+Warp state statistics however improved across the board (side note: Stall Long Scoreboard outlier for the softmax kernel (purple)):
 
 ![Warp Divergence](../../images/run1/fa_4x4_warp_divergence.png)
 
@@ -137,4 +137,4 @@ The fa_4x4 kernel demonstrates how **architectural constraints compound**:
 
 Addressing any single issue without solving the others provides limited speedup. The interconnected nature of CUDA performance tuning is evident here.
 
-For high level comparison of profiling results of `unfused` vs `fa_4x4` see: [profiles/md/run1/ncu_highlevel.md](profiles/md/run1/ncu_highlevel.md).
+For high level comparison of profiling results of `unfused` vs `fa_4x4` see: [ncu_highlevel.md](ncu_highlevel.md).
