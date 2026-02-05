@@ -29,11 +29,11 @@ The memory access pattern for shared stores is suboptimal, causing on average a 
 
 Memory throughput and L1 hit rates collapsed by ~99% compared to unfused kernels:
 
-![Bank Conflicts Distribution](profiles/images/run1/fa_4x4_bank_conflicts.png)
+![Bank Conflicts Distribution](../../images/run1/fa_4x4_bank_conflicts.png)
 
 **Memory Throughput Breakdown** (46% vs 82–90% for unfused matmul kernels):
 
-![Throughput Breakdown](profiles/images/run1/fa_4x4_throughput_breakdown.png)
+![Throughput Breakdown](../../images/run1/fa_4x4_throughput_breakdown.png)
 
 ### Root Cause
 
@@ -43,11 +43,11 @@ Memory throughput and L1 hit rates collapsed by ~99% compared to unfused kernels
 kv_block[col * Bc + row] = K[k_idx * d + col];  // Non-coalesced access
 ```
 
-![Bank Conflicts Source](profiles/images/run1/fa_4x4_bank_conflicts_source.png)
+![Bank Conflicts Source](../../images/run1/fa_4x4_bank_conflicts_source.png)
 
 Stores for B tile column and output accumulation also exhibit non-coalesced access patterns:
 
-![Bank Conflicts Details](profiles/images/run1/fa_4x4_bank_conflicts_source_2.png)
+![Bank Conflicts Details](../../images/run1/fa_4x4_bank_conflicts_source_2.png)
 
 ---
 
@@ -77,15 +77,15 @@ See [CUDA Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practic
 
 Theoretical and achieved active warps significantly decreased. Block limit per SM reduced to **2** due to register pressure (64 regs/thread) and large SRAM allocation (102 KB):
 
-![Occupancy Analysis](profiles/images/run1/fa_4x4_occupancy.png)
+![Occupancy Analysis](../../images/run1/fa_4x4_occupancy.png)
 
 Although eligible and issued warps increased, performance did not improve:
 
-![Warps per Scheduler](profiles/images/run1/fa_4x4_warps_per_scheduler.png)
+![Warps per Scheduler](../../images/run1/fa_4x4_warps_per_scheduler.png)
 
 Warp state statistics deteriorated across the board:
 
-![Warp Divergence](profiles/images/run1/fa_4x4_warp_divergence.png)
+![Warp Divergence](../../images/run1/fa_4x4_warp_divergence.png)
 
 ---
 
