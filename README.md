@@ -191,9 +191,9 @@ Detailed profiling analysis via Nsight Compute, comparing kernel performance acr
 2. **Achieved occupancy** (est. speedup 44%) — 37% vs 67% theoretical
 3. **Theoretical occupancy** (est. speedup 33%) — register and SRAM limits
 
-**High-level comparison**: [profiles/txt/run1/run1_ncu_highlevel.txt](profiles/txt/run1/run1_ncu_highlevel.txt)
+**High-level comparison**: [profiles/txt/run1/run1_ncu_highlevel.txt](profiles/md/run1/ncu_highlevel.md)
 
-**Full Analysis**: [profiles/txt/run1/run1_ncu_details.txt](profiles/txt/run1/run1_ncu_details.txt)
+**Full Analysis**: [profiles/txt/run1/run1_ncu_details.txt](profiles/md/run1/ncu_details.md)
 
 ### Run 2: Pending Optimizations in the Flash Attention Kernel
 
