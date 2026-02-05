@@ -25,7 +25,9 @@ __device__ __forceinline__ void matmul_warp_tiled(
     float* C,        // M x N
     int M,
     int N,
-    int K
+    int K,
+    int stride_B = 0,  // stride for B rows (0 = default N)
+    int stride_C = 0   // stride for C rows (0 = default N)
 ) {
     constexpr int TILE_SIZE = 4;
     
@@ -37,6 +39,10 @@ __device__ __forceinline__ void matmul_warp_tiled(
     int tid = threadIdx.x;
     int warp_id = tid / 32;
     int lane_id = tid % 32;
+    
+    // Use default stride if not provided
+    if (stride_B == 0) stride_B = N;
+    if (stride_C == 0) stride_C = N;
     
     // Each warp handles TILE_SIZE rows
     for (int row_start = TILE_SIZE * warp_id; row_start < M; row_start += WARPS_PER_BLOCK * TILE_SIZE) {
@@ -61,7 +67,7 @@ __device__ __forceinline__ void matmul_warp_tiled(
                 float b_vals[TILE_SIZE];
                 #pragma unroll
                 for (int j = 0; j < TILE_SIZE; j++) {
-                    b_vals[j] = B[k_idx * N + col_start + j];
+                    b_vals[j] = B[k_idx * stride_B + col_start + j];
                 }
                 
                 // Outer product
@@ -80,9 +86,9 @@ __device__ __forceinline__ void matmul_warp_tiled(
                 #pragma unroll
                 for (int j = 0; j < TILE_SIZE; j++) {
                     if constexpr (add_to_output) {
-                        C[(row_start + i) * N + (col_start + j)] += acc[i * TILE_SIZE + j];
+                        C[(row_start + i) * stride_C + (col_start + j)] += acc[i * TILE_SIZE + j];
                     } else {
-                        C[(row_start + i) * N + (col_start + j)] = acc[i * TILE_SIZE + j];
+                        C[(row_start + i) * stride_C + (col_start + j)] = acc[i * TILE_SIZE + j];
                     }
                 }
             }
@@ -178,7 +184,8 @@ __global__ void fa_kernel(
     const int tid = threadIdx.x;
 
     // Compute allocation sizes
-    int alloc_size = max(Br * Bc, Bc * d);
+    // Note: both output and scores buffers need (Bc+1) stride for padding
+    int alloc_size = max(Br * (Bc + 1), max((Bc + 1) * d, Bc * d));
     
     // TODO fix alloc sizes below
     // Shared memory layout
@@ -222,21 +229,21 @@ __global__ void fa_kernel(
     for (int kv_block_idx = 0; kv_block_idx < num_kv_blocks; kv_block_idx++) {
         int kv_rows = min(Bc, N - kv_block_idx * Bc);
         
-        // Load K (transposed)
+        // Load K (transposed with padding to eliminate bank conflicts)
         for (int idx = tid; idx < Bc * d; idx += THREADS) {
             int row = idx / d;
             int col = idx % d;
             int k_idx = kv_block_idx * Bc + row;
             if (k_idx < N) {
-                kv_block[col * Bc + row] = K[k_idx * d + col];
+                kv_block[col * (Bc + 1) + row] = K[k_idx * d + col];
             } else {
-                kv_block[col * Bc + row] = 0.0f;
+                kv_block[col * (Bc + 1) + row] = 0.0f;
             }
         }
         __syncthreads();
         
         // Compute scores = Q @ K^T
-        matmul_warp_tiled(q_block, kv_block, scores, q_rows, kv_rows, d);
+        matmul_warp_tiled(q_block, kv_block, scores, q_rows, kv_rows, d, Bc + 1, Bc + 1);
         __syncthreads();
         
         // Load V
@@ -287,7 +294,8 @@ template<int Br, int Bc, int THREADS>
 void launch_fa(const float *Q, const float *K, const float *V, float *O, int N, int d, float alpha, cudaStream_t stream = 0)
 {
     int BLOCKS = (N + Br - 1) / Br;
-    int alloc_size = max(Br * Bc, Bc * d);
+    // Allocate with padding for K transpose and scores buffers
+    int alloc_size = max(Br * (Bc + 1), max((Bc + 1) * d, Bc * d));
     size_t shared_mem = (4 * alloc_size + 3 * Br) * sizeof(float);      
     fa_kernel<Br, Bc, THREADS><<<BLOCKS, THREADS, shared_mem, stream>>>(Q, K, V, O, N, d, alpha);
 }
