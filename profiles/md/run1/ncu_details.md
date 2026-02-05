@@ -136,3 +136,5 @@ The fa_4x4 kernel demonstrates how **architectural constraints compound**:
 4. **Warp divergence** reduces effective thread parallelism from 32 to 16 per warp
 
 Addressing any single issue without solving the others provides limited speedup. The interconnected nature of CUDA performance tuning is evident here.
+
+For high level comparison of profiling results of `unfused` vs `fa_4x4` see: [profiles/md/run1/ncu_highlevel.md](profiles/md/run1/ncu_highlevel.md).
