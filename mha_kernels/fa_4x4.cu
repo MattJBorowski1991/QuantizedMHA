@@ -6,19 +6,18 @@
 #include "../utils/utils.cu"
 
 // Flash attention with Warp-level tiled matmul 
-// 4x4 register-level tile per lane => 4 x 128 chunk per warp which is warp-strided for all columns of Q
-// for this reason Q needs to have 128 columns (or mulitple of 128) for this to be most efficient solution
-// implementation yields elapsed cycles of 7,200,000 on L4 for N=4096, d_model=2048, h = 32
-// left for reference as it is not possible to build on it to implement TC WMMA (need 16 x d tile per warp)
+// Wr x Lc register-level tile per lane => 4 x (Lc x 32) chunk per warp which is warp-strided for all columns of Q
+
+// TODO: wrap the repetitive "Wr x warp_id -> Lc x lane_id -> Wr -> Lc" loop into a template device kernel that takes a lambda
 
 #define THREADS_PER_WARP 32
 #define WARPS_PER_BLOCK 16
 #define FULL_MASK 0xffffffff
 
-// Shared memory block matrix multiply (warp-tiled with register blocking)
-// Each warp: 4 rows, each lane (32 lanes): 4 columns per iteration
+// Shared memory block matrix multiply (warp-tiled)
+// Each warp: Wr rows, each lane (32 lanes): Lc columns per iteration
 // Accumulates into registers
-template <bool add_to_output = false, int THREADS>
+template <bool add_to_output = false, int THREADS, int Wr, int Lc>
 __device__ __forceinline__ void matmul_warp_tiled(
     const float* A,      // M x K
     const float* B,      // K x N
@@ -29,66 +28,66 @@ __device__ __forceinline__ void matmul_warp_tiled(
     int stride_B = 0,  // stride for B rows (0 = default N)
     int stride_C = 0   // stride for C rows (0 = default N)
 ) {
-    constexpr int TILE_SIZE = 4;
     
-    // Require dimensions to be multiples of TILE_SIZE for optimal unrolling
-    assert(M % TILE_SIZE == 0 && "M must be a multiple of TILE_SIZE");
-    assert(N % TILE_SIZE == 0 && "N must be a multiple of TILE_SIZE");
-    assert(K % TILE_SIZE == 0 && "K must be a multiple of TILE_SIZE");
-    
-    int tid = threadIdx.x;
-    int warp_id = tid / 32;
-    int lane_id = tid % 32;
+    // Require dimensions to be multiples of Wr/Lc for optimal unrolling
+    assert(M % Wr == 0 && "M must be a multiple of Wr");
+    assert(N % Lc == 0 && "N must be a multiple of Lc");
+    assert(K % Wr == 0 && "K must be a multiple of Wr");
     
     // Use default stride if not provided
     if (stride_B == 0) stride_B = N;
     if (stride_C == 0) stride_C = N;
+
+    int tid = threadIdx.x;
+    int warp_id = tid / 32;
+    int lane_id = tid % 32;
+
     
-    // Each warp handles TILE_SIZE rows
-    for (int row_start = TILE_SIZE * warp_id; row_start < M; row_start += WARPS_PER_BLOCK * TILE_SIZE) {
-        // Each lane handles TILE_SIZE columns
-        for (int col_start = TILE_SIZE * lane_id; col_start < N; col_start += THREADS_PER_WARP * TILE_SIZE) {
+    // Each warp handles Wr rows
+    for (int row_start = Wr * warp_id; row_start < M; row_start += WARPS_PER_BLOCK * Wr) {
+        // Each lane handles Lc columns
+        for (int col_start = Lc * lane_id; col_start < N; col_start += THREADS_PER_WARP * Lc) {
             
-            // Register accumulator (4x4)
-            float acc[TILE_SIZE * TILE_SIZE];
+            // Register accumulator (Wr x Lc)
+            float acc[Wr * Lc];
             #pragma unroll
-            for (int i = 0; i < TILE_SIZE * TILE_SIZE; i++) acc[i] = 0.0f;
+            for (int i = 0; i < Wr * Lc; i++) acc[i] = 0.0f;
             
             // Dot product loop
             for (int k_idx = 0; k_idx < K; k_idx++) {
                 // Load A tile row
-                float a_vals[TILE_SIZE];
+                float a_vals[Wr];
                 #pragma unroll
-                for (int i = 0; i < TILE_SIZE; i++) {
+                for (int i = 0; i < Wr; i++) {
                     a_vals[i] = A[(row_start + i) * K + k_idx];
                 }
                 
                 // Load B tile column
-                float b_vals[TILE_SIZE];
+                float b_vals[Wr];
                 #pragma unroll
-                for (int j = 0; j < TILE_SIZE; j++) {
+                for (int j = 0; j < Wr; j++) {
                     b_vals[j] = B[k_idx * stride_B + col_start + j];
                 }
                 
                 // Outer product
                 #pragma unroll
-                for (int i = 0; i < TILE_SIZE; i++) {
+                for (int i = 0; i < Wr; i++) {
                     #pragma unroll
-                    for (int j = 0; j < TILE_SIZE; j++) {
-                        acc[i * TILE_SIZE + j] += a_vals[i] * b_vals[j];
+                    for (int j = 0; j < Lc; j++) {
+                        acc[i * Lc + j] += a_vals[i] * b_vals[j];
                     }
                 }
             }
             
             // Store to C
             #pragma unroll
-            for (int i = 0; i < TILE_SIZE; i++) {
+            for (int i = 0; i < Wr; i++) {
                 #pragma unroll
-                for (int j = 0; j < TILE_SIZE; j++) {
+                for (int j = 0; j < Lc; j++) {
                     if constexpr (add_to_output) {
-                        C[(row_start + i) * stride_C + (col_start + j)] += acc[i * TILE_SIZE + j];
+                        C[(row_start + i) * stride_C + (col_start + j)] += acc[i * Lc + j];
                     } else {
-                        C[(row_start + i) * stride_C + (col_start + j)] = acc[i * TILE_SIZE + j];
+                        C[(row_start + i) * stride_C + (col_start + j)] = acc[i * Lc + j];
                     }
                 }
             }
@@ -96,129 +95,173 @@ __device__ __forceinline__ void matmul_warp_tiled(
     }
 }
 
-// TODO: one warp handles 1 row but should be handling 4 rows like in matmul_warp_tiled
-// TODO: otherwise perf deficiencies: 
-// (i) bank conflicts,
-// (ii) poor cache locality - (softmax warp 0 computes row 0, matmul warp 0 reads rows 0-3 from different cache lines)
-// (iii) load imbalance (some warps may finish earlier than others)
-
-// Online softmax: scale scores, find max, compute softmax probs, update statistics, rescale output, accumulate O += P @ V
-template<int THREADS>
+// Online softmax: Wr rows per warp (matching matmul parallelism)
+// Scale scores, find max, compute softmax probs, update statistics, rescale output, accumulate O += P @ V
+template<int Br, int Bc, int THREADS, int Wr, int Lc>
 __device__ __forceinline__ void online_softmax_and_accum_output(
     float* max_cur,
     const float* max_prev,
     float* sum_exp,
-    float* scores,     // to be overwritten with softmax probs
+    float* scores,     // to be overwritten with softmax probs, layout [Br x (Bc+1)]
     float* output,
     const float* values, // V (Bc x head_dim)
-    int Br,
-    int Bc,
     int head_dim,
     float sqrt_d
 ) {
+
     int tid = threadIdx.x;
     int warp_id = tid / 32;
     int lane_id = tid % 32;
 
-    // Process one query row per warp
-    for (int q_row = warp_id; q_row < Br; q_row += WARPS_PER_BLOCK) {
-        // Step 1: Find max in this KV block's scores for this query row and scale by 1/sqrt(d)
-        float max_new = max_prev[q_row];
-        for (int kv_col = lane_id; kv_col < Bc; kv_col += THREADS_PER_WARP) {
-            float score_scaled = scores[q_row * Bc + kv_col] / sqrt_d;
-            max_new = fmaxf(max_new, score_scaled);
-            scores[q_row * Bc + kv_col] = score_scaled;
+    // Process Wr query rows per warp (same as matmul_warp_tiled)
+    for (int row_start = Wr * warp_id; row_start < Br; row_start += WARPS_PER_BLOCK * Wr) {
+        
+        // Local arrays to track max, sum, and exp_max_diff for Wr rows
+        float max_new[Wr], sum_new[Wr], exp_max_diff[Wr];
+        #pragma unroll
+        for (int i = 0; i < Wr; i++) {
+            max_new[i] = max_prev[row_start + i];
+            sum_new[i] = 0.0f;
         }
         
-        // Warp reduction to get global max for this query row
+        // Step 1: Find max in scores for each row and scale by 1/sqrt(d)
+        for (int col_start = Lc * lane_id; col_start < Bc; col_start += THREADS_PER_WARP * Lc) {
+            #pragma unroll
+            for (int i = 0; i < Wr; i++) {
+                #pragma unroll
+                for (int j = 0; j < Lc; j++) {
+                    int row_idx = row_start + i;
+                    int col_idx = col_start + j;
+                    if (col_idx < Bc) {
+                        float score_scaled = scores[row_idx * (Bc + 1) + col_idx] / sqrt_d;
+                        max_new[i] = fmaxf(max_new[i], score_scaled);
+                        scores[row_idx * (Bc + 1) + col_idx] = score_scaled;
+                    }
+                }
+            }
+        }
+        
+        // Warp reduction to get global max for each of the Wr rows
         #pragma unroll
-        for (int shift = THREADS_PER_WARP / 2; shift >= 1; shift >>= 1) {
-            max_new = fmaxf(max_new, __shfl_xor_sync(FULL_MASK, max_new, shift));
+        for (int i = 0; i < Wr; i++) {
+            #pragma unroll
+            for (int shift = THREADS_PER_WARP / 2; shift >= 1; shift >>= 1) {
+                max_new[i] = fmaxf(max_new[i], __shfl_xor_sync(FULL_MASK, max_new[i], shift));
+            }
         }
 
-        // Step 2: Compute exp(score - max) and accumulate sum with warp reduction
-        float sum_new = 0.0f;
-        for (int kv_col = lane_id; kv_col < Bc; kv_col += THREADS_PER_WARP) {
-            float prob = expf(scores[q_row * Bc + kv_col] - max_new);
-            scores[q_row * Bc + kv_col] = prob;  // Store softmax prob back
-            sum_new += prob;
+        // Step 2: Compute exp(score - max) and accumulate sum
+        for (int col_start = Lc * lane_id; col_start < Bc; col_start += THREADS_PER_WARP * Lc) {
+            #pragma unroll
+            for (int i = 0; i < Wr; i++) {
+                #pragma unroll
+                for (int j = 0; j < Lc; j++) {
+                    int row_idx = row_start + i;
+                    int col_idx = col_start + j;
+                    if (col_idx < Bc) {
+                        float prob = expf(scores[row_idx * (Bc + 1) + col_idx] - max_new[i]);
+                        scores[row_idx * (Bc + 1) + col_idx] = prob;
+                        sum_new[i] += prob;
+                    }
+                }
+            }
         }
         
-        // Warp reduction to get global sum
+        // Warp reduction to get global sum for each row
         #pragma unroll
-        for (int shift = THREADS_PER_WARP / 2; shift >= 1; shift >>= 1) {
-            sum_new += __shfl_xor_sync(FULL_MASK, sum_new, shift);
+        for (int i = 0; i < Wr; i++) {
+            #pragma unroll
+            for (int shift = THREADS_PER_WARP / 2; shift >= 1; shift >>= 1) {
+                sum_new[i] += __shfl_xor_sync(FULL_MASK, sum_new[i], shift);
+            }
         }
 
         // Step 3: Update max and sum statistics (only first lane writes)
-        float exp_max_diff = expf(max_prev[q_row] - max_new);
-        if (lane_id == 0) {
-            max_cur[q_row] = max_new;
-            sum_exp[q_row] = exp_max_diff * sum_exp[q_row] + sum_new;
+        #pragma unroll
+        for (int i = 0; i < Wr; i++) {
+            exp_max_diff[i] = expf(max_prev[row_start + i] - max_new[i]);
+            if (lane_id == 0) {
+                max_cur[row_start + i] = max_new[i];
+                sum_exp[row_start + i] = exp_max_diff[i] * sum_exp[row_start + i] + sum_new[i];
+            }
         }
         
-        // Step 4: Rescale output accumulator by exp(max_old - max_new)
+        // Step 4: Rescale output accumulator by exp(max_old - max_new) for each row
         for (int d_idx = lane_id; d_idx < head_dim; d_idx += THREADS_PER_WARP) {
-            output[q_row * head_dim + d_idx] *= exp_max_diff;
+            #pragma unroll
+            for (int i = 0; i < Wr; i++) {
+                output[(row_start + i) * head_dim + d_idx] *= exp_max_diff[i];
+            }
         }
     }
     
     __syncthreads();
     
     // Step 5: Accumulate O += (softmax probs) @ V
-    matmul_warp_tiled<true>(scores, values, output, Br, head_dim, Bc);
+    matmul_warp_tiled<true, THREADS, Wr, Lc>(scores, values, output, Br, head_dim, Bc, Bc + 1);
 }
 
-template<int Br, int Bc, int THREADS>
+template<int Br, int Bc, int THREADS, int d, int Wr, int Lc>
 __global__ void fa_kernel(
     const float* Q,    // [N, d]
     const float* K,    // [N, d]
     const float* V,    // [N, d]
     float* O,          // [N, d]
     const int N,       // Sequence length
-    const int d,       // Dimension per head
-    const float scale  // softmax_scale (1/sqrt(d) is passed as scale)
+    const float scale,  // softmax_scale (1/sqrt(d) is passed as scale)
+    const float sqrt_d  // 1/sqrt(d), pre-computed to save registers
 ) {
-    // One block per Br Q-rows
+    
+    assert(N % Br == 0 && "N must be a multiple of Br");
+    assert(N % Bc == 0 && "N must be a multiple of Bc");
+
+    // One block per Br of Q-rows
     const int q_block_idx = blockIdx.x;
     const int tid = threadIdx.x;
-
-    // Compute allocation sizes
-    // Note: both output and scores buffers need (Bc+1) stride for padding
-    int alloc_size = max(Br * (Bc + 1), max((Bc + 1) * d, Bc * d));
     
-    // TODO fix alloc sizes below
-    // Shared memory layout
+    // Shared memory layout (exact allocation)
     extern __shared__ float shared_mem[];
-    float *output = shared_mem;                      // [Br x d]
-    float *q_block = &shared_mem[alloc_size];        // [Br x d]
-    float *kv_block = &shared_mem[2 * alloc_size];   // Holds K or V
-    float *scores = &shared_mem[3 * alloc_size];     // Holds scores or probs
-    float *sum_exp = &shared_mem[4 * alloc_size];    // [Br]
-    float *max_statistics = &shared_mem[4 * alloc_size + Br]; // [2*Br]
-    float *max_cur = &shared_mem[4 * alloc_size + 2 * Br];
-    
-    float* max_prev = max_statistics;
-    float* max_cur_ptr = max_cur;
+    float *output = shared_mem;                                           // [Br x d]
+    float *q_block = shared_mem + Br*d;                                   // [Br x d]
+    float *kv_block = shared_mem + 2*Br*d;                                // [(Bc+1) x d]
+    float *scores = shared_mem + 2*Br*d + (Bc+1)*d;                       // [Br x (Bc+1)]
+    float *sum_exp = shared_mem + 2*Br*d + (Bc+1)*d + Br*(Bc+1);          // [Br]
+    float* max_prev = shared_mem + 2*Br*d + (Bc+1)*d + Br*(Bc+1) + Br;    // [Br]
+    float* max_curr = max_prev + Br;                                   // [Br]
+    // Total SRAM required = Br×d + Br×d + (Bc+1)×d + Br×(Bc+1) + Br + Br + Br = (2×Br×d + (Bc+1)×d + Br×(Bc+1) + 3×Br) x 4bytes
 
-    int q_rows = min(Br, N - q_block_idx * Br);
-    
-    // Load Q block
-    for (int idx = tid; idx < Br * d; idx += THREADS) {
-        int row = idx / d;
-        int col = idx % d;
-        if (q_block_idx * Br + row < N) {
-            q_block[idx] = Q[(q_block_idx * Br + row) * d + col];
-        } else {
-            q_block[idx] = 0.0f;
+    // Load Q block (warp/lane distribution for future scalability)
+    for (int row_start = Wr * warp_id; row_start < Br; row_start += WARPS_PER_BLOCK * Wr) {
+        for (int col_start = Lc * lane_id; col_start < d; col_start += THREADS_PER_WARP * Lc) {
+            #pragma unroll
+            for (int i = 0; i < Wr; i++) {
+                #pragma unroll
+                for (int j = 0; j < Lc; j++) {
+                    int row = row_start + i;
+                    int col = col_start + j;
+                    if (q_block_idx * Br + row < N && col < d) {
+                        q_block[row * d + col] = Q[(q_block_idx * Br + row) * d + col];
+                    } else {
+                        q_block[row * d + col] = 0.0f;
+                    }
+                }
+            }
         }
     }
     
-    // Initialize output, statistics
-    for (int idx = tid; idx < q_rows * d; idx += THREADS) {
-        output[idx] = 0.0f;
+    // Initialize output, statistics (warp/lane distribution)
+    for (int row_start = Wr * warp_id; row_start < Br; row_start += WARPS_PER_BLOCK * Wr) {
+        for (int col_start = Lc * lane_id; col_start < d; col_start += THREADS_PER_WARP * Lc) {
+            #pragma unroll
+            for (int i = 0; i < Wr; i++) {
+                #pragma unroll
+                for (int j = 0; j < Lc; j++) {
+                    output[(row_start + i) * d + (col_start + j)] = 0.0f;
+                }
+            }
+        }
     }
-    for (int idx = tid; idx < q_rows; idx += THREADS) {
+    for (int idx = lane_id; idx < Br; idx += THREADS_PER_WARP) {
         sum_exp[idx] = 0.0f;
         max_prev[idx] = -INFINITY;
     }
@@ -227,85 +270,115 @@ __global__ void fa_kernel(
     // Main loop over K,V blocks
     int num_kv_blocks = (N + Bc - 1) / Bc;
     for (int kv_block_idx = 0; kv_block_idx < num_kv_blocks; kv_block_idx++) {
-        int kv_rows = min(Bc, N - kv_block_idx * Bc);
         
-        // Load K (transposed with padding to eliminate bank conflicts)
-        for (int idx = tid; idx < Bc * d; idx += THREADS) {
-            int row = idx / d;
-            int col = idx % d;
-            int k_idx = kv_block_idx * Bc + row;
-            if (k_idx < N) {
-                kv_block[col * (Bc + 1) + row] = K[k_idx * d + col];
-            } else {
-                kv_block[col * (Bc + 1) + row] = 0.0f;
+        // Load K (transposed with padding, warp/lane distribution)
+        for (int row_start = Wr * warp_id; row_start < Bc; row_start += WARPS_PER_BLOCK * Wr) {
+            for (int col_start = Lc * lane_id; col_start < d; col_start += THREADS_PER_WARP * Lc) {
+                #pragma unroll
+                for (int i = 0; i < Wr; i++) {
+                    #pragma unroll
+                    for (int j = 0; j < Lc; j++) {
+                        int row = row_start + i;
+                        int col = col_start + j;
+                        int k_idx = kv_block_idx * Bc + row;
+                        if (k_idx < N && col < d) {
+                            kv_block[col * (Bc + 1) + row] = K[k_idx * d + col];
+                        } else {
+                            kv_block[col * (Bc + 1) + row] = 0.0f;
+                        }
+                    }
+                }
             }
         }
         __syncthreads();
         
-        // Compute scores = Q @ K^T
-        matmul_warp_tiled(q_block, kv_block, scores, q_rows, kv_rows, d, Bc + 1, Bc + 1);
+        // Compute scores = Q @ K^T = Br x Bc
+        matmul_warp_tiled<false, THREADS, Wr, Lc>(q_block, kv_block, scores, Br, Bc, d, Bc + 1, Bc + 1);
         __syncthreads();
         
-        // Load V
-        for (int idx = tid; idx < Bc * d; idx += THREADS) {
-            int row = idx / d;
-            int col = idx % d;
-            int k_idx = kv_block_idx * Bc + row;
-            if (k_idx < N) {
-                kv_block[idx] = V[k_idx * d + col];
-            } else {
-                kv_block[idx] = 0.0f;
+        // Load V (warp/lane distribution)
+        for (int row_start = Wr * warp_id; row_start < Bc; row_start += WARPS_PER_BLOCK * Wr) {
+            for (int col_start = Lc * lane_id; col_start < d; col_start += THREADS_PER_WARP * Lc) {
+                #pragma unroll
+                for (int i = 0; i < Wr; i++) {
+                    #pragma unroll
+                    for (int j = 0; j < Lc; j++) {
+                        int row = row_start + i;
+                        int col = col_start + j;
+                        int k_idx = kv_block_idx * Bc + row;
+                        if (k_idx < N && col < d) {
+                            kv_block[row * d + col] = V[k_idx * d + col];
+                        } else {
+                            kv_block[row * d + col] = 0.0f;
+                        }
+                    }
+                }
             }
         }
         __syncthreads();
         
-        // Online softmax + output accumulation
-        float sqrt_d = sqrtf((float)d);
-        online_softmax_and_accum_output(max_cur_ptr, max_prev, sum_exp, scores, output, kv_block, q_rows, kv_rows, d, sqrt_d);
+        // Online softmax (Br x Bc) + output accumulation (Br x d)
+        online_softmax_and_accum_output<Br, Bc, THREADS, Wr, Lc>(max_curr, max_prev, sum_exp, scores, output, kv_block, d, sqrt_d);
         __syncthreads();
         
         // Swap statistics pointers for next iteration
-        float* tmp = max_prev; max_prev = max_cur_ptr; max_cur_ptr = tmp;
+        float* tmp = max_prev; max_prev = max_curr; max_curr = tmp;
     }
 
-    // TODO: above one warp handles one row and below we do a block-stride across the full Q_block?
-    // TODO: for d > THREADS below we do the same thing with multiple loop iterations
-
-    // Epilogue: normalize output and write to global memory
-    for (int idx = tid; idx < q_rows * d; idx += THREADS) {
-        int row = idx / d;
-        if (sum_exp[row] > 0.0f) {
-            output[idx] /= sum_exp[row];
+    // Epilogue: normalize output and write to global memory (warp/lane distribution)
+    for (int row_start = Wr * warp_id; row_start < Br; row_start += WARPS_PER_BLOCK * Wr) {
+        for (int col_start = Lc * lane_id; col_start < d; col_start += THREADS_PER_WARP * Lc) {
+            #pragma unroll
+            for (int i = 0; i < Wr; i++) {
+                #pragma unroll
+                for (int j = 0; j < Lc; j++) {
+                    int row = row_start + i;
+                    int col = col_start + j;
+                    if (sum_exp[row] > 0.0f) {
+                        output[row * d + col] /= sum_exp[row];
+                    }
+                }
+            }
         }
     }
     __syncthreads();
     
-    // Store to global memory
-    for (int idx = tid; idx < q_rows * d; idx += THREADS) {
-        int row = idx / d;
-        int col = idx % d;
-        if (q_block_idx * Br + row < N) {
-            O[(q_block_idx * Br + row) * d + col] = output[idx];
+    // Store to global memory (warp/lane distribution)
+    for (int row_start = Wr * warp_id; row_start < Br; row_start += WARPS_PER_BLOCK * Wr) {
+        for (int col_start = Lc * lane_id; col_start < d; col_start += THREADS_PER_WARP * Lc) {
+            #pragma unroll
+            for (int i = 0; i < Wr; i++) {
+                #pragma unroll
+                for (int j = 0; j < Lc; j++) {
+                    int row = row_start + i;
+                    int col = col_start + j;
+                    if (q_block_idx * Br + row < N && col < d) {
+                        O[(q_block_idx * Br + row) * d + col] = output[row * d + col];
+                    }
+                }
+            }
         }
     }
 }
 
-template<int Br, int Bc, int THREADS>
-void launch_fa(const float *Q, const float *K, const float *V, float *O, int N, int d, float alpha, cudaStream_t stream = 0)
+template<int Br, int Bc, int THREADS, int Wr, int Lc, int d>
+void launch_fa(const float *Q, const float *K, const float *V, float *O, int N, float alpha, cudaStream_t stream = 0)
 {
     int BLOCKS = (N + Br - 1) / Br;
-    // Allocate with padding for K transpose and scores buffers
-    int alloc_size = max(Br * (Bc + 1), max((Bc + 1) * d, Bc * d));
-    size_t shared_mem = (4 * alloc_size + 3 * Br) * sizeof(float);      
-    fa_kernel<Br, Bc, THREADS><<<BLOCKS, THREADS, shared_mem, stream>>>(Q, K, V, O, N, d, alpha);
+    // Exact SRAM allocation: output + q_block + kv_block + scores + sum_exp + max_prev/max_cur
+    size_t shared_mem = (2*Br*d + (Bc+1)*d + Br*(Bc+1) + 3*Br) * sizeof(float);
+    float sqrt_d = 1.0f / sqrtf((float)d);  // Pre-compute to save registers in kernel
+    fa_kernel<Br, Bc, THREADS, d, Wr, Lc><<<BLOCKS, THREADS, shared_mem, stream>>>(Q, K, V, O, N, alpha, sqrt_d);
 }
 
 extern "C" void solve(const float *Q, const float *K, const float *V, float *output, int N, int d_model, int h)
 {   
-    constexpr int THREADS = 512;
+    constexpr int THREADS = WARPS_PER_BLOCK * THREADS_PER_WARP;
+
+
     auto fa_kernel = [](const float* q_s, const float* k_s, const float* v_s, float* out_s, int N, int d_head, float alpha, cudaStream_t stream, void* aux){
         (void)aux;
-        launch_fa<Br, Bc, THREADS>(q_s, k_s, v_s, out_s, N, d_head, alpha, stream);
+        launch_fa<Br, Bc, THREADS, Wr, Lc, 64>(q_s, k_s, v_s, out_s, N, alpha, stream);
     };
     launch(Q, K, V, output, N, d_model, h, fa_kernel, 0);
 }

@@ -98,7 +98,7 @@ This kernel's theoretical occupancy is **limited by resource constraints**, not 
 ### Limiting Factors
 
 - **Registers per thread**: 64 (high pressure)
-- **Shared memory per block**: 102 KB
+- **Shared memory per block**: 33.54 KB
 - **Theoretical warps per scheduler**: 8 (below hardware max of 12)
 
 ### Key Metric
