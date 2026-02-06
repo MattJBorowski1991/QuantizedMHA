@@ -10,7 +10,7 @@ constexpr int Bc = 32;             // Key/Value block column size
 
 // Warp-level tile parameters (warp-tiled matmul)
 constexpr int Wr = 4;              // Warp rows per block
-constexpr int Lc = 1;              // Lane columns per iteration
+constexpr int Lc = 1;              // Lane columns per iteration - TODO: increase to 2
 
 // TODO Profile run: try Lc = 2, 4; Bc = 64 (sram?); 
 
@@ -18,7 +18,7 @@ constexpr int Lc = 1;              // Lane columns per iteration
 constexpr int NSTREAMS = 2;
 
 // Problem size configuration
-constexpr int N = 4096;             // Sequence length - increased 4096->8192 to have >2 blocks per SM
+constexpr int N = 4096;             // Sequence length - TODO increase 4096->8192 to have >2 blocks per SM
 constexpr int d_model = 1024;       // Model dimension
 constexpr int h = 16;               // Number of attention heads
 
