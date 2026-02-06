@@ -204,10 +204,11 @@ Detailed profiling analysis via Nsight Compute, comparing kernel performance acr
 
 **Full Analysis**: [profiles/md/run1/ncu_details.md](profiles/md/run1/ncu_details.md)
 
-### Run 2: Pending Optimizations in the Flash Attention Kernel
+### Run 2: Flash Attention Kernel optimizations
 
-**Status**: TBD — focused on addressing the identified bottlenecks from Run 1:
-- Fixing non-coalesced shared memory access patterns (transposed K tile store)
-- Reducing register pressure and SRAM footprint
-- Improving warp distribution and occupancy
-- Aligning matmul and softmax warp work divisions
+**Summary**: Removed bank conflicts, introduce uniform warp/lane work, increased N=4096 -> 8192.
+
+**Result** Custom Flash Attention kernel now beats Unfused by 2x in Duration.
+
+
+**Status**: TBD — pending full NCU report analysis.

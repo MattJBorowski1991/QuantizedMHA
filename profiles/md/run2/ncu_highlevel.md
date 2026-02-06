@@ -1,4 +1,3 @@
-```markdown
 # Nsight Compute Profiling Comparison (run2)
 
 Detailed performance metrics comparing unfused attention components vs fused FA_4X4 implementation (run2).
@@ -173,43 +172,43 @@ Detailed performance metrics comparing unfused attention components vs fused FA_
 | Average SMSP Active Cycles | 5160150.36 | 1876927.43 | 4412590.34 | 4848676.45 |
 | Total SMSP Elapsed Cycles | 1197964208 | 438782008 | 1046599048 | 1513484304 |
 
-  FA_4X4:
-    fa_kernel:
-      OPT   Est. Speedup: 18.72%
-            One or more SMs have a much higher number of active cycles than the average number of active cycles. Maximum
-            instance value is 25.19% above the average, while the minimum instance value is 9.07% below the average.
-
-      OPT   Est. Speedup: 18.71%
-            One or more SMSPs have a much higher number of active cycles than the average number of active cycles.
-            Maximum instance value is 25.18% above the average, while the minimum instance value is 9.09% below the
-            average.
-
-      OPT   Est. Speedup: 18.72%
-            One or more L1 Slices have a much higher number of active cycles than the average number of active cycles.
-            Maximum instance value is 25.19% above the average, while the minimum instance value is 9.07% below the
-            average.
-
----
-
-## Source Counters
-
-| | Unfused | | | FA_4X4 |
-|---|---|---|---|---|
-| Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
-| Branch Instructions Ratio (%) | 0.10 | 0.09 | 0.09 | 0.05 |
-| Branch Instructions | 44040192 | 6979584 | 37773312 | 19756032 |
-| Branch Efficiency (%) | 100 | 100 | 100 | 100 |
-| Avg. Divergent Branches | 0 | 0 | 0 | 0 |
-
-  FA_4X4:
-    fa_kernel:
-      OPT   Est. Speedup: 31.65%
-            This kernel has uncoalesced shared accesses resulting in hotspot/excessive wavefronts as reported by the
-            profiler. Check the L1 Wavefronts Shared Excessive table and the Source page for primary source locations and
-            consider optimizing shared memory access patterns.
-
----
-
-**End of Profiling Comparison (run2)**
-
-```
++  FA_4X4:
++    fa_kernel:
++      OPT   Est. Speedup: 18.72%
++            One or more SMs have a much higher number of active cycles than the average number of active cycles. Maximum
++            instance value is 25.19% above the average, while the minimum instance value is 9.07% below the average.
++
++      OPT   Est. Speedup: 18.71%
++            One or more SMSPs have a much higher number of active cycles than the average number of active cycles.
++            Maximum instance value is 25.18% above the average, while the minimum instance value is 9.09% below the
++            average.
++
++      OPT   Est. Speedup: 18.72%
++            One or more L1 Slices have a much higher number of active cycles than the average number of active cycles.
++            Maximum instance value is 25.19% above the average, while the minimum instance value is 9.07% below the
++            average.
++
++---
++
++## Source Counters
++
++| | Unfused | | | FA_4X4 |
++|---|---|---|---|---|
++| Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
++| Branch Instructions Ratio (%) | 0.10 | 0.09 | 0.09 | 0.05 |
++| Branch Instructions | 44040192 | 6979584 | 37773312 | 19756032 |
++| Branch Efficiency (%) | 100 | 100 | 100 | 100 |
++| Avg. Divergent Branches | 0 | 0 | 0 | 0 |
++
++  FA_4X4:
++    fa_kernel:
++      OPT   Est. Speedup: 31.65%
++            This kernel has uncoalesced shared accesses resulting in hotspot/excessive wavefronts as reported by the
++            profiler. Check the L1 Wavefronts Shared Excessive table and the Source page for primary source locations and
++            consider optimizing shared memory access patterns.
++
++---
++
++**End of Profiling Comparison (run2)**
++
++```
