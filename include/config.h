@@ -20,7 +20,7 @@ constexpr int NSTREAMS = 2;
 // Problem size configuration
 constexpr int N = 4096;             // Sequence length - TODO increase 4096->8192 to have >2 blocks per SM
 constexpr int d_model = 1024;       // Model dimension
-constexpr int h = 16;               // Number of attention heads
+constexpr int h = 32;               // Number of attention heads - TODO increase back to 64 & handle sram overflow
 
 // Validate dimensions and compute per-head dimension
 static_assert(d_model % h == 0, "d_model must be divisible by h");

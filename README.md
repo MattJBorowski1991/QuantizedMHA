@@ -43,6 +43,15 @@ One lane handles a 16x4 mini-tile in register so that one warp can handle a full
 
 ## Usage
 
+### 0. Check NCU access on your device
+
+```
+bash
+cat /proc/driver/nvidia/params | grep RmProfilingAdminOnly`
+```
+
+If you get `RmProfilingAdminOnly: 0`, it means you have access to Nvidia Performance Counters and hence to NCU.
+
 ### 1. Build
 ```bash
 make clean && make KERNEL=<kernel_name> NVCC_ARCH=XX

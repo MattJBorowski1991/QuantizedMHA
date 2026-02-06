@@ -1,5 +1,6 @@
 #include <cuda_runtime.h>
 #include <math.h>
+#include <assert.h>
 #include <limits>
 #include "../include/config.h"
 #include "../include/launchers.h"
@@ -25,6 +26,7 @@ __device__ __forceinline__ void matmul_warp_tiled(
     int M,
     int N,
     int K,
+    int stride_A = 0,  // stride for A rows (0 = default K)
     int stride_B = 0,  // stride for B rows (0 = default N)
     int stride_C = 0   // stride for C rows (0 = default N)
 ) {
@@ -35,6 +37,7 @@ __device__ __forceinline__ void matmul_warp_tiled(
     assert(K % Wr == 0 && "K must be a multiple of Wr");
     
     // Use default stride if not provided
+    if (stride_A == 0) stride_A = K;
     if (stride_B == 0) stride_B = N;
     if (stride_C == 0) stride_C = N;
 
@@ -59,7 +62,7 @@ __device__ __forceinline__ void matmul_warp_tiled(
                 float a_vals[Wr];
                 #pragma unroll
                 for (int i = 0; i < Wr; i++) {
-                    a_vals[i] = A[(row_start + i) * K + k_idx];
+                    a_vals[i] = A[(row_start + i) * stride_A + k_idx];
                 }
                 
                 // Load B tile column
@@ -106,7 +109,7 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     float* output,
     const float* values, // V (Bc x head_dim)
     int head_dim,
-    float sqrt_d
+    float inv_sqrt_d
 ) {
 
     int tid = threadIdx.x;
@@ -133,7 +136,7 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
                     int row_idx = row_start + i;
                     int col_idx = col_start + j;
                     if (col_idx < Bc) {
-                        float score_scaled = scores[row_idx * (Bc + 1) + col_idx] / sqrt_d;
+                        float score_scaled = scores[row_idx * (Bc + 1) + col_idx] * inv_sqrt_d;
                         max_new[i] = fmaxf(max_new[i], score_scaled);
                         scores[row_idx * (Bc + 1) + col_idx] = score_scaled;
                     }
@@ -185,6 +188,7 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
                 sum_exp[row_start + i] = exp_max_diff[i] * sum_exp[row_start + i] + sum_new[i];
             }
         }
+        __syncthreads();  // Ensure all threads see updated sum_exp and max_cur
         
         // Step 4: Rescale output accumulator by exp(max_old - max_new) for each row
         for (int d_idx = lane_id; d_idx < head_dim; d_idx += THREADS_PER_WARP) {
@@ -198,7 +202,7 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     __syncthreads();
     
     // Step 5: Accumulate O += (softmax probs) @ V
-    matmul_warp_tiled<true, THREADS, Wr, Lc>(scores, values, output, Br, head_dim, Bc, Bc + 1);
+    matmul_warp_tiled<true, THREADS, Wr, Lc>(scores, values, output, Br, head_dim, Bc, Bc + 1, head_dim, 0);
 }
 
 template<int Br, int Bc, int THREADS, int d, int Wr, int Lc>
@@ -209,8 +213,12 @@ __global__ void fa_kernel(
     float* O,          // [N, d]
     const int N,       // Sequence length
     const float scale,  // softmax_scale (1/sqrt(d) is passed as scale)
-    const float sqrt_d  // 1/sqrt(d), pre-computed to save registers
+    const float inv_sqrt_d  // 1/sqrt(d), pre-computed to save registers
 ) {
+    
+    // Ensure configuration is valid
+    static_assert(Br % (WARPS_PER_BLOCK * Wr) == 0 || Br >= WARPS_PER_BLOCK * Wr, 
+                  "Br must be >= WARPS_PER_BLOCK * Wr to ensure all warps have rows to process");
     
     assert(N % Br == 0 && "N must be a multiple of Br");
     assert(N % Bc == 0 && "N must be a multiple of Bc");
@@ -218,6 +226,9 @@ __global__ void fa_kernel(
     // One block per Br of Q-rows
     const int q_block_idx = blockIdx.x;
     const int tid = threadIdx.x;
+
+    const int warp_id = tid / 32;
+    const int lane_id = tid % 32;
     
     // Shared memory layout (exact allocation)
     extern __shared__ float shared_mem[];
@@ -263,13 +274,25 @@ __global__ void fa_kernel(
     }
     for (int idx = lane_id; idx < Br; idx += THREADS_PER_WARP) {
         sum_exp[idx] = 0.0f;
-        max_prev[idx] = -INFINITY;
+        max_prev[idx] = 0.0f;  // Start at 0, not -INFINITY (first iteration will set it to actual max)
     }
     __syncthreads();
 
     // Main loop over K,V blocks
     int num_kv_blocks = (N + Bc - 1) / Bc;
     for (int kv_block_idx = 0; kv_block_idx < num_kv_blocks; kv_block_idx++) {
+        
+        // Initialize max_curr for this iteration
+        // Warp warp_id initializes rows [warp_id*Wr, (warp_id+1)*Wr)
+        if (lane_id == 0) {
+            for (int i = 0; i < Wr; i++) {
+                int row_idx = warp_id * Wr + i;
+                if (row_idx < Br) {
+                    max_curr[row_idx] = -INFINITY;
+                }
+            }
+        }
+        __syncthreads();
         
         // Load K (transposed with padding, warp/lane distribution)
         for (int row_start = Wr * warp_id; row_start < Bc; row_start += WARPS_PER_BLOCK * Wr) {
@@ -318,11 +341,19 @@ __global__ void fa_kernel(
         __syncthreads();
         
         // Online softmax (Br x Bc) + output accumulation (Br x d)
-        online_softmax_and_accum_output<Br, Bc, THREADS, Wr, Lc>(max_curr, max_prev, sum_exp, scores, output, kv_block, d, sqrt_d);
+        online_softmax_and_accum_output<Br, Bc, THREADS, Wr, Lc>(max_curr, max_prev, sum_exp, scores, output, kv_block, d, inv_sqrt_d);
         __syncthreads();
         
-        // Swap statistics pointers for next iteration
-        float* tmp = max_prev; max_prev = max_curr; max_curr = tmp;
+        // Copy max_curr to max_prev for next iteration (only for rows this warp processes)
+        if (lane_id == 0) {
+            for (int i = 0; i < Wr; i++) {
+                int row_idx = warp_id * Wr + i;
+                if (row_idx < Br) {
+                    max_prev[row_idx] = max_curr[row_idx];
+                }
+            }
+        }
+        __syncthreads();
     }
 
     // Epilogue: normalize output and write to global memory (warp/lane distribution)
@@ -334,13 +365,18 @@ __global__ void fa_kernel(
                 for (int j = 0; j < Lc; j++) {
                     int row = row_start + i;
                     int col = col_start + j;
-                    if (sum_exp[row] > 0.0f) {
-                        output[row * d + col] /= sum_exp[row];
+                    if (row < Br && col < d) {
+                        if (sum_exp[row] > 1e-10f) {  // Use small epsilon instead of > 0
+                            output[row * d + col] /= sum_exp[row];
+                        } else {
+                            output[row * d + col] = 0.0f;  // Handle zero sum_exp case
+                        }
                     }
                 }
             }
         }
     }
+    
     __syncthreads();
     
     // Store to global memory (warp/lane distribution)
@@ -366,19 +402,21 @@ void launch_fa(const float *Q, const float *K, const float *V, float *O, int N, 
 {
     int BLOCKS = (N + Br - 1) / Br;
     // Exact SRAM allocation: output + q_block + kv_block + scores + sum_exp + max_prev/max_cur
+    // output: Br*d, q_block: Br*d, kv_block: (Bc+1)*d, scores: Br*(Bc+1), sum_exp: Br, max_prev: Br, max_curr: Br
     size_t shared_mem = (2*Br*d + (Bc+1)*d + Br*(Bc+1) + 3*Br) * sizeof(float);
-    float sqrt_d = 1.0f / sqrtf((float)d);  // Pre-compute to save registers in kernel
-    fa_kernel<Br, Bc, THREADS, d, Wr, Lc><<<BLOCKS, THREADS, shared_mem, stream>>>(Q, K, V, O, N, alpha, sqrt_d);
+    float inv_sqrt_d = 1.0f / sqrtf((float)d);  // Pre-compute to save registers in kernel
+    
+    fa_kernel<Br, Bc, THREADS, d, Wr, Lc><<<BLOCKS, THREADS, shared_mem, stream>>>(Q, K, V, O, N, alpha, inv_sqrt_d);
+
 }
 
 extern "C" void solve(const float *Q, const float *K, const float *V, float *output, int N, int d_model, int h)
 {   
     constexpr int THREADS = WARPS_PER_BLOCK * THREADS_PER_WARP;
 
-
     auto fa_kernel = [](const float* q_s, const float* k_s, const float* v_s, float* out_s, int N, int d_head, float alpha, cudaStream_t stream, void* aux){
         (void)aux;
-        launch_fa<Br, Bc, THREADS, Wr, Lc, 64>(q_s, k_s, v_s, out_s, N, alpha, stream);
+        launch_fa<Br, Bc, THREADS, Wr, Lc, d>(q_s, k_s, v_s, out_s, N, alpha, stream);
     };
     launch(Q, K, V, output, N, d_model, h, fa_kernel, 0);
 }
