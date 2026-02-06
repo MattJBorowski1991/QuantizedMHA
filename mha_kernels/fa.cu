@@ -12,7 +12,7 @@
 // TODO: wrap the repetitive "Wr x warp_id -> Lc x lane_id -> Wr -> Lc" loop into a template device kernel that takes a lambda
 
 #define THREADS_PER_WARP 32
-#define WARPS_PER_BLOCK 16
+#define WARPS_PER_BLOCK 8
 #define FULL_MASK 0xffffffff
 
 // Shared memory block matrix multiply (warp-tiled)
