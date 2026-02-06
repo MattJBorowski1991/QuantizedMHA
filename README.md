@@ -16,11 +16,11 @@ For detailed profiling analysis, see [Profiling Results](#profiling-results) bel
 ### `unfused.cu` - Unfused Attention Components
 Implements individual operations of attention separately (Q@K^T, softmax, output projection) as standalone kernels rather than fusing them into a single kernel. This modular approach allows flexibility in optimization and profiling of individual attention components.
 
-### `fa_4x4.cu` - FlashAttention-2
+### `fa.cu` - FlashAttention-2
 A foundational FlashAttention-2 implementation with fused RoPE (Rotary Position Embeddings) that performs single-pass online softmax computation. Each block processes one Q tile with proper per-query-row normalization, using shared memory for efficient Q, K, V tile management. Each lane within warp owns a 4x4 minitile of Q in a register.
 
-### `fa_4x4_int8.cu` - FlashAttention-2 with int8 [WIP]
-Quantization applied to fa_4x4
+### `fa_int8.cu` - FlashAttention-2 with int8 [WIP]
+Quantization applied to fa
 0. Quantize float→int8 preprocessing: convert float inputs to int8 using scale/zero before main kernel
 1. Dequantize on-the-fly in Q@K^T
 2. Handle float x int8 for P@V matmul
@@ -48,7 +48,7 @@ One lane handles a 16x4 mini-tile in register so that one warp can handle a full
 make clean && make KERNEL=<kernel_name> NVCC_ARCH=XX
 ```
 
-Replace `<kernel_name>` with desired kernel (`unfused`, `fa`, `fa_warps`, `fa_tc`; defaults to `unfused`). **Note:** `fa_int8` is pending and not yet available.
+Replace `<kernel_name>` with desired kernel (`unfused`, `fa`, `fa_int8`; defaults to `unfused`). **Note:** `fa_int8` is pending and not yet available.
 
 **Note:** For accurate profiling, compile one kernel variant at a time. Each compilation should have its own binary to avoid register allocation changes and ensure clean performance metrics.
 
@@ -72,7 +72,7 @@ and/or
 ncu ./bin/profile_fa_tc 2>&1 | head -500 | grep "Elapsed Cycles" | tail -1 | awk '{print $NF}'
 ```
 
-Available binaries: `profile_unfused`, `profile_fa`, `profile_fa_warps`, `profile_fa_tc` (note: `profile_fa_int8` pending)
+Available binaries: `profile_unfused`, `profile_fa`, `profile_fa_int8`
 
 Options:
 - `--warmup=N` - Number of warmup runs (default: 2)
@@ -89,7 +89,7 @@ ncu --import-source yes --set full --export profiles/ncu/fa.ncu-rep ./bin/profil
 
 Export txt and csv summaries:
 ```bash
-ncu --import profiles/ncu/fa_int8.ncu-rep > profiles/txt/fa_int8.txt
+ncu --import profiles/ncu/fa.ncu-rep > profiles/txt/fa.txt
 ncu --import profiles/ncu/fa_int8.ncu-rep --csv > profiles/csv/fa_int8.csv
 ```
 
@@ -109,12 +109,14 @@ compute-sanitizer ./bin/profile_fa_tc
 ### 5. Notes
 
 #### 5.1. Shared memory in `fa.cu`
-Requires `(4 * max(Br*Bc, Bc*d) + 3*Br) * sizeof(float)` which equals:
-- **Br=128**: ~264KB (exceeds 96KB GPU limit)
-- **Br=64**: ~66KB (tight, may fail)
-- **Br=32**: ~33KB (fits safely)
+Requires `(2×Br×d + (Bc+1)×d + Br×(Bc+1) + 3×Br) × sizeof(float)` (exact per-buffer allocation).
 
-In case of SRAM overflow the kernel will either fail silently or generate incorrect code.
+With **d=64, Bc=32**:
+- **Br=128**: ~92.4 KB (exceeds 96 KB GPU limit slightly)
+- **Br=64**: **50.4 KB** (current config, fits comfortably, 2 blocks/SM max)
+- **Br=32**: ~29.4 KB (fits safely, allows ~3 blocks/SM if registers permit)
+
+**Note**: Current Br=64 is optimal for future Tensor Cores (16-row warp granularity). Occupancy bottleneck is registers (64/thread), not SRAM.
 
 #### 5.2. Warps in FA2 and TC WMMA
 
@@ -126,7 +128,7 @@ In case of SRAM overflow the kernel will either fail silently or generate incorr
 
 - If warp_rows = 16, then Br has to be a multiple of warp_rows:
 
-For N = 4096, d = 2048, h = 32:
+For N = 4096, d = 2048, h = 32 (past config):
 - **Br=32**: 2 warps per block, ~33KB shared mem ✓
 - **Br=48**: 3 warps per block, ~50KB shared mem ✓
 - **Br=64**: 4 warps per block, ~66KB shared mem (kernel fails silently) ✗
