@@ -21,8 +21,8 @@ Detailed performance metrics comparing unfused attention components vs fused FA_
 | Compute (SM) Throughput (%) | 82.63 | 22.08 | 89.79 | 68.35 |
 
 
-      INF   The kernel is utilizing greater than 80.0% of the available compute or memory performance of the device.
-
+    INF   Compute and Memory are well-balanced: To reduce runtime, both computation and memory traffic must be reduced. 
+          Check both the Compute Workload Analysis and Memory Workload Analysis sections.    
 ---
 
 ## PM Sampling
@@ -49,8 +49,9 @@ Detailed performance metrics comparing unfused attention components vs fused FA_
 | SM Busy (%) | 38.01 | 17.36 | 38.94 | 36.28 |
 
 
-      INF   ALU / compute utilization notes vary per kernel; see individual sections for details.
-
+    OPT   Est. Local Speedup: 83.1%                                                                                     
+          All compute pipelines are under-utilized. Either this workload is very small or it doesn't issue enough warps 
+          per scheduler. Check the Launch Statistics and Scheduler Statistics sections for further details.  
 ---
 
 ## Memory Workload Analysis
@@ -67,8 +68,6 @@ Detailed performance metrics comparing unfused attention components vs fused FA_
 | Mem Pipes Busy (%) | 82.63 | 22.08 | 89.79 | 68.35 |
 
 
-      OPT   Est. Speedups and memory access recommendations are shown in the per-kernel analysis above.
-
 ---
 
 ## Scheduler Statistics
@@ -83,8 +82,15 @@ Detailed performance metrics comparing unfused attention components vs fused FA_
 | Eligible Warps Per Scheduler | 1.61 | 0.22 | 1.54 | 0.66 |
 
 
-      OPT   Local speedup estimates and scheduler observations are included in kernel sections.
-
+    OPT   Est. Local Speedup: 31.65%                                                                                    
+          Every scheduler is capable of issuing one instruction per cycle, but for this kernel each scheduler only      
+          issues an instruction every 2.8 cycles. This might leave hardware resources underutilized and may lead to     
+          less optimal performance. Out of the maximum of 12 warps per scheduler, this kernel allocates an average of   
+          3.72 active warps per scheduler, but only an average of 0.66 warps were eligible per cycle. Eligible warps    
+          are the subset of active warps that are ready to issue their next instruction. Every cycle with no eligible   
+          warp results in no instruction being issued and the issue slot remains unused. To increase the number of      
+          eligible warps, reduce the time the active warps are stalled by inspecting the top stall reasons on the Warp  
+          State Statistics and Source Counters sections.  
 ---
 
 ## Warp State Statistics
@@ -98,8 +104,18 @@ Detailed performance metrics comparing unfused attention components vs fused FA_
 | Avg. Not Predicated Off Threads | 30.08 | 31.24 | 30.31 | 30.81 |
 
 
-      OPT   Warp-level stall breakdowns are in the full profiles; consider coalescing/shared-memory changes where noted.
-
+    OPT   Est. Speedup: 31.65%                                                                                          
+          On average, each warp of this kernel spends 3.7 cycles being stalled waiting for the MIO (memory              
+          input/output) instruction queue to be not full. This stall reason is high in cases of extreme utilization of  
+          the MIO pipelines, which include special math instructions, dynamic branches, as well as shared memory        
+          instructions. When caused by shared memory accesses, trying to use fewer but wider loads can reduce pipeline  
+          pressure. This stall type represents about 36.4% of the total average of 10.3 cycles between issuing two      
+          instructions.                                                                                                 
+    ----- --------------------------------------------------------------------------------------------------------------
+    INF   Check the Warp Stall Sampling (All Samples) table for the top stall locations in your source based on         
+          sampling data. The Kernel Profiling Guide                                                                     
+          (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-reference) provides more details    
+          on each stall reason. 
 ---
 
 ## Instruction Statistics
@@ -133,8 +149,6 @@ Detailed performance metrics comparing unfused attention components vs fused FA_
 | Waves Per SM | 753.29 | 23.54 | 2.94 | 0.74 |
 
 
-      OPT   Launch configuration notes included in kernel sections (e.g., low waves per SM for `fa_kernel`).
-
 ---
 
 ## Occupancy
@@ -152,7 +166,17 @@ Detailed performance metrics comparing unfused attention components vs fused FA_
 | Achieved Active Warps Per SM | 46.40 | 46.61 | 42.29 | 14.89 |
 
 
-      OPT   Occupancy differences suggest FA kernel is limited by shared memory and register choices.
+    OPT   Est. Speedup: 31.65%                                                                                          
+          The difference between calculated theoretical (50.0%) and measured achieved occupancy (31.0%) can be the      
+          result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can   
+          occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices   
+          Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on     
+          optimizing occupancy.                                                                                         
+    ----- --------------------------------------------------------------------------------------------------------------
+    OPT   Est. Speedup: 31.65%                                                                                          
+          The 6.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (50.0%) is limited by the required amount of      
+          shared memory.                                                                                                
 
 ---
 
@@ -172,43 +196,24 @@ Detailed performance metrics comparing unfused attention components vs fused FA_
 | Average SMSP Active Cycles | 5160150.36 | 1876927.43 | 4412590.34 | 4848676.45 |
 | Total SMSP Elapsed Cycles | 1197964208 | 438782008 | 1046599048 | 1513484304 |
 
-+  FA_4X4:
-+    fa_kernel:
-+      OPT   Est. Speedup: 18.72%
-+            One or more SMs have a much higher number of active cycles than the average number of active cycles. Maximum
-+            instance value is 25.19% above the average, while the minimum instance value is 9.07% below the average.
-+
-+      OPT   Est. Speedup: 18.71%
-+            One or more SMSPs have a much higher number of active cycles than the average number of active cycles.
-+            Maximum instance value is 25.18% above the average, while the minimum instance value is 9.09% below the
-+            average.
-+
-+      OPT   Est. Speedup: 18.72%
-+            One or more L1 Slices have a much higher number of active cycles than the average number of active cycles.
-+            Maximum instance value is 25.19% above the average, while the minimum instance value is 9.07% below the
-+            average.
-+
-+---
-+
-+## Source Counters
-+
-+| | Unfused | | | FA_4X4 |
-+|---|---|---|---|---|
-+| Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
-+| Branch Instructions Ratio (%) | 0.10 | 0.09 | 0.09 | 0.05 |
-+| Branch Instructions | 44040192 | 6979584 | 37773312 | 19756032 |
-+| Branch Efficiency (%) | 100 | 100 | 100 | 100 |
-+| Avg. Divergent Branches | 0 | 0 | 0 | 0 |
-+
-+  FA_4X4:
-+    fa_kernel:
-+      OPT   Est. Speedup: 31.65%
-+            This kernel has uncoalesced shared accesses resulting in hotspot/excessive wavefronts as reported by the
-+            profiler. Check the L1 Wavefronts Shared Excessive table and the Source page for primary source locations and
-+            consider optimizing shared memory access patterns.
-+
-+---
-+
-+**End of Profiling Comparison (run2)**
-+
-+```
+
+## Source Counters
+
+| | Unfused | | | FA_4X4 |
+|---|---|---|---|---|
+| Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
+| Branch Instructions Ratio (%) | 0.10 | 0.09 | 0.09 | 0.05 |
+| Branch Instructions | 44040192 | 6979584 | 37773312 | 19756032 |
+| Branch Efficiency (%) | 100 | 100 | 100 | 100 |
+| Avg. Divergent Branches | 0 | 0 | 0 | 0 |
+
+  FA_4X4:
+    fa_kernel:
+      OPT   Est. Speedup: 31.65%
+            This kernel has uncoalesced shared accesses resulting in hotspot/excessive wavefronts as reported by the
+            profiler. Check the L1 Wavefronts Shared Excessive table and the Source page for primary source locations and
+            consider optimizing shared memory access patterns.
+
+---
+
+**End of Profiling Comparison (run2)**
