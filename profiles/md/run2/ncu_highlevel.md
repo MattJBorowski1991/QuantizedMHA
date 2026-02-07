@@ -1,6 +1,6 @@
 # Nsight Compute Profiling Comparison (run2)
 
-Detailed performance metrics comparing unfused attention components vs fused FA_4X4 implementation (run2).
+High level performance metrics comparing unfused attention components vs fa (run2).
 
 ---
 
@@ -182,19 +182,20 @@ Detailed performance metrics comparing unfused attention components vs fused FA_
 
 ## GPU and Memory Workload Distribution
 
-| | Unfused | | | FA_4X4 |
-|---|---|---|---|---|
-| Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
-| Average DRAM Active Cycles | 6302016 | 12319170.67 | 8575805.33 | 74653.33 |
-| Total DRAM Elapsed Cycles | 230162432 | 82484224 | 198531072 | 294135808 |
-| Average L1 Active Cycles | 5160453.86 | 1882557.21 | 4413095.83 | 4848924.40 |
-| Total L1 Elapsed Cycles | 299491052 | 109695502 | 261649762 | 378371076 |
-| Average L2 Active Cycles | 4612062.38 | 1890935.54 | 4527558.67 | 1321096.54 |
-| Total L2 Elapsed Cycles | 125477808 | 45954936 | 109655280 | 158448360 |
-| Average SM Active Cycles | 5160453.86 | 1882557.21 | 4413095.83 | 4848924.40 |
-| Total SM Elapsed Cycles | 299491052 | 109695502 | 261649762 | 378371076 |
-| Average SMSP Active Cycles | 5160150.36 | 1876927.43 | 4412590.34 | 4848676.45 |
-| Total SMSP Elapsed Cycles | 1197964208 | 438782008 | 1046599048 | 1513484304 |
+| Metric Name | mma_A_Bt | % | softmax | % | mma_A_B | % | fa_kernel | % |
+|---|---|---|---|---|---|---|---|---|
+| Average DRAM Active Cycles | 6,302,016 | 23.9% | 12,319,171 | 62.1% | 8,575,806 | 32.6% | 74,654 | 0.5% |
+| Total DRAM Elapsed Cycles | 230,162,432 | 10.7% | 82,484,224 | 10.5% | 198,531,072 | 10.6% | 294,135,808 | 10.8% |
+| Average L1 Active Cycles | 5,160,454 | 19.6% | 1,882,558 | 9.5% | 4,413,096 | 16.8% | 4,848,925 | 30.4% |
+| Total L1 Elapsed Cycles | 299,491,052 | 13.9% | 109,695,502 | 13.9% | 261,649,762 | 14.0% | 378,371,076 | 13.9% |
+| Average L2 Active Cycles | 4,612,063 | 17.5% | 1,890,936 | 9.5% | 4,527,559 | 17.2% | 1,321,097 | 8.3% |
+| Total L2 Elapsed Cycles | 125,477,808 | 5.8% | 45,954,936 | 5.8% | 109,655,280 | 5.8% | 158,448,360 | 5.8% |
+| Average SM Active Cycles | 5,160,454 | 19.6% | 1,882,558 | 9.5% | 4,413,096 | 16.8% | 4,848,925 | 30.4% |
+| Total SM Elapsed Cycles | 299,491,052 | 13.9% | 109,695,502 | 13.9% | 261,649,762 | 14.0% | 378,371,076 | 13.9% |
+| Average SMSP Active Cycles | 5,160,151 | 19.5% | 1,876,928 | 9.5% | 4,412,591 | 16.7% | 4,848,677 | 30.4% |
+| Total SMSP Elapsed Cycles | 1,197,964,208 | 55.7% | 438,782,008 | 55.7% | 1,046,599,048 | 55.8% | 1,513,484,304 | 55.6% |
+| Sum of average active cycles | 26,395,138 | 100.0% | 19,852,151 | 100.0% | 26,342,148 | 100.0% | 15,942,278 | 100.0% |
+| Sum of total elapsed cycles | 2,152,586,552 | 100.0% | 786,612,172 | 100.0% | 1,878,084,924 | 100.0% | 2,722,810,624 | 100.0% |
 
 
 ## Source Counters

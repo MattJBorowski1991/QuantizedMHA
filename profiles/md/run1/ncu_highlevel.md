@@ -1,6 +1,6 @@
 # Nsight Compute Profiling Comparison
 
-Detailed performance metrics comparing unfused attention components vs fused FA_4X4 implementation.
+High level performance metrics comparing unfused attention components vs fused FA_4X4 implementation.
 
 ---
 

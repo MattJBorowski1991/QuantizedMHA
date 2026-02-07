@@ -206,9 +206,17 @@ Detailed profiling analysis via Nsight Compute, comparing kernel performance acr
 
 ### Run 2: Flash Attention Kernel optimizations
 
-**Summary**: Removed bank conflicts, introduce uniform warp/lane work, increased N=4096 -> 8192.
+**Summary**: Comparative profiling after optimizations: removed bank conflicts, introduced uniform warp/lane work, and increased sequence length N from 4096 to 8192.
 
-**Result** Custom Flash Attention kernel now beats Unfused by 2x in Duration.
+**Key Findings**:
+- **FA latency improvement**: Now 74% lower than unfused baseline (vs. 41% higher in Run 1).
+- **Optimizations applied**: Bank conflict reduction and uniform work distribution.
+- **Sequence length**: Scaled to N=8192 for larger inputs.
+- **FA Memory throughput** (speed of data transfer across all device memory levels) of only ~0.4 GB/s vs 50-270 GB/s of the kernels in Unfused is a major efficiency. FA avoids redundant DRAM loads by reusing Q/K/V tiles in SRAM and L2 cache (98.84% L2 hit rate, 0.15% DRAM access).
 
 
-**Status**: TBD — pending full NCU report analysis.
+**Status**:
+- Preparing architecture for Tensor Cores (each warp handling 16×d or 32×d tiles).
+- Block requirements: At least 64×d per block for Tensor Core compatibility.
+
+**High level Analysis**: [profiles/md/run2/ncu_highlevel.md](profiles/md/run2/ncu_highlevel.md)
