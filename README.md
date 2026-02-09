@@ -204,19 +204,12 @@ Detailed profiling analysis via Nsight Compute, comparing kernel performance acr
 
 **Full Analysis**: [profiles/md/run1/ncu_details.md](profiles/md/run1/ncu_details.md)
 
-### Run 2: Flash Attention Kernel optimizations
+### Run 2: Flash Attention Kernel Optimizations
 
-**Summary**: Comparative profiling after optimizations: removed bank conflicts, introduced uniform warp/lane work, and increased sequence length N from 4096 to 8192.
-
-**Key Findings**:
-- **FA latency improvement**: Now 74% lower than unfused baseline (vs. 41% higher in Run 1).
-- **Optimizations applied**: Bank conflict reduction and uniform work distribution.
-- **Sequence length**: Scaled to N=8192 for larger inputs.
-- **FA Memory throughput** (speed of data transfer across all device memory levels) of only ~0.4 GB/s vs 50-270 GB/s of the kernels in Unfused is a major efficiency. FA avoids redundant DRAM loads by reusing Q/K/V tiles in SRAM and L2 cache (98.84% L2 hit rate, 0.15% DRAM access).
-
+**Summary**: Significant improvements achieved by removing bank conflicts, unifying warp/lane work, and reducing register pressure. Key results include a 74% latency reduction compared to the unfused baseline and a 99% L2 cache hit rate. Remaining bottlenecks include Mio throttle stalls and occupancy limitations.
 
 **Status**:
-- Preparing architecture for Tensor Cores (each warp handling 16×d or 32×d tiles).
+- Preparing architecture for Tensor Cores (each warp handling 16×d or 32×d tiles) and quantization.
 - Block requirements: At least 64×d per block for Tensor Core compatibility.
 
-**High level Analysis**: [profiles/md/run2/ncu_highlevel.md](profiles/md/run2/ncu_highlevel.md)
+**Detailed Analysis**: [profiles/md/run2/ncu_details.md](profiles/md/run2/ncu_details.md)

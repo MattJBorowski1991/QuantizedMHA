@@ -1,12 +1,12 @@
 # Nsight Compute Profiling Comparison (run2)
 
-High level performance metrics comparing unfused attention components vs fa (run2).
+High level performance metrics comparing unfused attention components vs fa (run2). We remove 4x4 from the kernel name as rows handled by warps `Wr` and columns handled by lanes `Lc` are now customizable and set to `Wr = 4` and `Lc = 1`. This is done in preparation for the subsequent implementation of Tensor Cores for which we will have `Wr = 16` or `32`.
 
 ---
 
 ## GPU Speed Of Light Throughput
 
-| | Unfused | | | FA_4X4 |
+| | Unfused | | | FA |
 |---|---|---|---|---|
 | Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
 | DRAM Frequency (Ghz) | 6.24 | 6.24 | 6.24 | 6.24 |

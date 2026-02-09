@@ -400,6 +400,7 @@ __global__ void fa_kernel(
 template<int Br, int Bc, int THREADS, int Wr, int Lc, int d>
 void launch_fa(const float *Q, const float *K, const float *V, float *O, int N, float alpha, cudaStream_t stream = 0)
 {
+
     int BLOCKS = (N + Br - 1) / Br;
     // Exact SRAM allocation: output + q_block + kv_block + scores + sum_exp + max_prev/max_cur
     // output: Br*d, q_block: Br*d, kv_block: (Bc+1)*d, scores: Br*(Bc+1), sum_exp: Br, max_prev: Br, max_curr: Br
