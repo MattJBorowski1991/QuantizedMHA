@@ -6,12 +6,15 @@ Run 2 focused on optimizing the Flash Attention kernel to address bottlenecks id
 
 - **Bank Conflict Removal**: Padding was introduced to eliminate shared memory bank conflicts, reducing shared store conflicts from 18M to 140K.
 - **Unified Warp/Lane Work**: Each warp now handles `Wr` rows of Q, while each lane processes `Lc` columns within the `Wr x d` slice.
+- **Removal of Warp Divergence**: Average Threads per Warp increased from `16` to `32`.
+- **Shared memory reduction**: Exact SRAM array allocation allowed to increase the block limit per SM from `2` to `3`. 
 - **Register Pressure Reduction**: Statically scoped variables were replaced with runtime values, leveraging compile-time constants and static assertions where possible.
-- **Increased Sequence Length**: Sequence length was scaled from N=4096 to N=8192 to keep the device busy (increase the number of blocks and hence increase Waves per SM)
+- **Increased Sequence Length**: Sequence length was scaled from `N=4096` to `N=8192` to keep the device busy (increase the number of blocks from `64` to `128` and hence increase Waves per SM from `0.55` to `0.74`)
 
 ### Key Results
 
-- **Latency Improvement**: Flash Attention latency is now 74% lower than the unfused baseline (vs. 41% higher in Run 1).
+- **Latency Improvement**: Flash Attention latency is now 74% lower than the unfused baseline (41% higher in Run 1).
+- **Throughput Increase**: Both compute & memory throughput increased 50% relative to `fa_4x4.cu`.
 - **L2 Cache Efficiency**: Achieved a 99% L2 cache hit rate, minimizing DRAM accesses.
 - **Remaining Bottlenecks**:
   - Mio throttle stalls (32% estimated speedup potential).
@@ -35,8 +38,6 @@ Detailed analysis and profiling metrics are provided below, along with visualiza
 
 ---
 
-**Results**
-
 ## I. Mio Throttle Stalls — Est. Speedup = 32%
 
 ### Overview
@@ -47,8 +48,8 @@ Detailed analysis and profiling metrics are provided below, along with visualiza
 
 | Metric | Value | Interpretation |
 |---|---|---|
-| `smsp__issue_active.avg.per_cycle_active` | 0,362786 | Increase the average number of instructions issued per cycle |
-| `smsp_average_mio_throttle` | 3,73325 | Decrease the number of cycles spent in mio throttle stalls |
+| `smsp__issue_active.avg.per_cycle_active` | 0.362786 | Increase the average number of instructions issued per cycle |
+| `smsp_average_mio_throttle` | 3.73325 | Decrease the number of cycles spent in mio throttle stalls |
 
 ---
 
@@ -72,20 +73,20 @@ Mismatch between theoretical (50%) and achieved (31%) occupancy due to:
 
 | Metric | Value | Target |
 |---|---|---|
-| `sm__warps_active.avg.pct_of_peak_sustained_active` | 31,0175 | Increase the achieved occupancy towards the theoretical limit (50.0%) |
+| `sm__warps_active.avg.pct_of_peak_sustained_active` | 31.0175 | Increase the achieved occupancy towards the theoretical limit (50.0%) |
 | `smsp__maximum_warps_avg_per_active_cycle` | 6 | Increase the theoretical number of warps per schedule that can be issued |
 ---
 
-## Verification vs Run1
+## Verification vs Run 1
 
-Even though performance improvement vs Run 1 is significant, we verify the detailed metrics listed in Run 1 to see if there is consistency with provided NCU guidance.
+Although the performance improvement compared to Run 1 is significant, we verify the detailed metrics to ensure consistency with NCU guidance.
 
 Ad. I. Shared Store Bank Conflicts
 
 | Metric | Run 1 | Run 2 | Run 1 Guidance | Comment |
 |---|---|---|
 | `l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_st.sum` | 18,300,000 | 140,000 | Decrease shared store bank conflicts | ~Entire bottleneck removal |
-| `l1tex__throughput.avg.pct_of_peak_sustained_active` | 76.81% |  91.96% | Higher L1/Tex cache throughput amplifies issue | Although the metric increased, it is beneficial in this context |
+| `l1tex__throughput.avg.pct_of_peak_sustained_active` | 76.81% |  91.96% | Higher L1/Tex cache throughput amplifies issue | Not applicable; L1 hit rate ≈ 0% due to SRAM usage |
 
 Ad. II. & III. Occupancy
 
@@ -97,6 +98,8 @@ Ad. II. & III. Occupancy
 We can see that the removal of the bank conflict bottleneck dwarfed the relative deterioration in the occupancy metrics.
 
 ## Detailed NCU analysis
+
+The below comparison is done relative to the Unfused kernels (mma + softmax mma) and not relative to the previous version of the Flash Attention kernel. 
 
 The reduced memory and compute throughput highlights the efficiency of Flash Attention (before we apply Tensor Cores):
 

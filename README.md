@@ -195,7 +195,7 @@ Detailed profiling analysis via Nsight Compute, comparing kernel performance acr
 - **FA_4X4 latency**: 9.07 ms (1 kernel, 1.4× slower)
 - **Occupancy**: Unfused 87–100%, FA_4X4 only 37%
 - **Grid utilization**: Unfused 65,536 blocks, FA_4X4 only 64 blocks
-- **Root cause**: FA_4X4 limited by register pressure (64 regs/thread) and large SRAM (102 KB)
+- **Root cause**: FA_4X4 limited by register pressure (64 regs/thread) and large SRAM (33.54 KB)
 
 **Top Optimization Opportunities**:
 1. **Shared store bank conflicts** (est. speedup 53%) — 68.56% of stores affected
@@ -206,10 +206,16 @@ Detailed profiling analysis via Nsight Compute, comparing kernel performance acr
 
 ### Run 2: Flash Attention Kernel Optimizations
 
-**Summary**: Significant improvements achieved by removing bank conflicts, unifying warp/lane work, and reducing register pressure. Key results include a 74% latency reduction compared to the unfused baseline and a 99% L2 cache hit rate. Remaining bottlenecks include Mio throttle stalls and occupancy limitations.
+**Summary**: Significant improvements achieved by removing bank conflicts, unifying warp/lane work, and reducing Shared Memory usage and register pressure. 
+
+**Results**: `74%` latency reduction compared to the unfused baseline and a `99%` L2 cache hit rate. Waves up from `0.55` to `0.74`. Remaining bottlenecks include Mio throttle stalls and occupancy limitations.
 
 **Status**:
-- Preparing architecture for Tensor Cores (each warp handling 16×d or 32×d tiles) and quantization.
-- Block requirements: At least 64×d per block for Tensor Core compatibility.
+- Preparing architecture for Tensor Cores (each warp handling `16×d` or `32×d` tiles) and quantization.
+- Block requirements: At least `64×d` per block for Tensor Core compatibility.
 
 **Detailed Analysis**: [profiles/md/run2/ncu_details.md](profiles/md/run2/ncu_details.md)
+
+### Run 3: Tensor Cores and Stall Mitigation [Pending]
+
+Run 3 focuses on integrating Tensor Cores (first testing with `16x4` tiles per lane) and eliminating the Mio throttle stalls identified in Run 2.
