@@ -216,6 +216,15 @@ Detailed profiling analysis via Nsight Compute, comparing kernel performance acr
 
 **Detailed Analysis**: [profiles/md/run2/ncu_details.md](profiles/md/run2/ncu_details.md)
 
-### Run 3: Tensor Cores and Stall Mitigation [Pending]
+### Run 3: Tensor Cores v1
 
 Run 3 focuses on integrating Tensor Cores (first testing with `16x4` tiles per lane) and eliminating the Mio throttle stalls identified in Run 2.
+
+
+### Run 4: Tensor Cores v2 [Pending]
+
+Run 4 focuses on spreading the work of 16 x d between 2 warps: 
+Warp0 owns 16 x [0, d/2] 
+Warp1 owns 16 x [d/2 + 1, d]
+
+
