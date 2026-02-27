@@ -5,6 +5,9 @@
 #include "../include/config.h"
 #include "../include/launchers.h"
 #include "../utils/utils.cu"
+#include <stdio.h>
+
+#define PAD 1
 
 // Flash attention with Warp-level tiled matmul 
 // Wr x Lc register-level tile per lane => 4 x (Lc x 32) chunk per warp which is warp-strided for all columns of Q
@@ -12,7 +15,7 @@
 // TODO: wrap the repetitive "Wr x warp_id -> Lc x lane_id -> Wr -> Lc" loop into a template device kernel that takes a lambda
 
 #define THREADS_PER_WARP 32
-#define WARPS_PER_BLOCK 8
+#define WARPS_PER_BLOCK 16
 #define FULL_MASK 0xffffffff
 
 // Shared memory block matrix multiply (warp-tiled)
@@ -107,8 +110,7 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     float* sum_exp,
     float* scores,     // to be overwritten with softmax probs, layout [Br x (Bc+1)]
     float* output,
-    const float* values, // V (Bc x head_dim)
-    int head_dim,
+    const float* values, // V (Bc x d)
     float inv_sqrt_d
 ) {
 
@@ -136,9 +138,9 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
                     int row_idx = row_start + i;
                     int col_idx = col_start + j;
                     if (col_idx < Bc) {
-                        float score_scaled = scores[row_idx * (Bc + 1) + col_idx] * inv_sqrt_d;
+                        float score_scaled = scores[row_idx * (Bc + PAD) + col_idx] * inv_sqrt_d;
                         max_new[i] = fmaxf(max_new[i], score_scaled);
-                        scores[row_idx * (Bc + 1) + col_idx] = score_scaled;
+                        scores[row_idx * (Bc + PAD) + col_idx] = score_scaled;
                     }
                 }
             }
@@ -162,8 +164,8 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
                     int row_idx = row_start + i;
                     int col_idx = col_start + j;
                     if (col_idx < Bc) {
-                        float prob = expf(scores[row_idx * (Bc + 1) + col_idx] - max_new[i]);
-                        scores[row_idx * (Bc + 1) + col_idx] = prob;
+                        float prob = expf(scores[row_idx * (Bc + PAD) + col_idx] - max_new[i]);
+                        scores[row_idx * (Bc + PAD) + col_idx] = prob;
                         sum_new[i] += prob;
                     }
                 }
@@ -191,10 +193,10 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
         __syncthreads();  // Ensure all threads see updated sum_exp and max_cur
         
         // Step 4: Rescale output accumulator by exp(max_old - max_new) for each row
-        for (int d_idx = lane_id; d_idx < head_dim; d_idx += THREADS_PER_WARP) {
+        for (int d_idx = lane_id; d_idx < d; d_idx += THREADS_PER_WARP) {
             #pragma unroll
             for (int i = 0; i < Wr; i++) {
-                output[(row_start + i) * head_dim + d_idx] *= exp_max_diff[i];
+                output[(row_start + i) * d + d_idx] *= exp_max_diff[i];
             }
         }
     }
@@ -202,7 +204,8 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     __syncthreads();
     
     // Step 5: Accumulate O += (softmax probs) @ V
-    matmul_warp_tiled<true, THREADS, Wr, Lc>(scores, values, output, Br, head_dim, Bc, Bc + 1, head_dim, 0);
+    
+    matmul_warp_tiled<true, THREADS, Wr, Lc>(scores, values, output, Br, d, Bc, Bc + PAD, d, d);
 }
 
 template<int Br, int Bc, int THREADS, int d, int Wr, int Lc>
@@ -217,8 +220,7 @@ __global__ void fa_kernel(
 ) {
     
     // Ensure configuration is valid
-    static_assert(Br % (WARPS_PER_BLOCK * Wr) == 0 || Br >= WARPS_PER_BLOCK * Wr, 
-                  "Br must be >= WARPS_PER_BLOCK * Wr to ensure all warps have rows to process");
+    static_assert(Br == WARPS_PER_BLOCK * Wr);
     
     assert(N % Br == 0 && "N must be a multiple of Br");
     assert(N % Bc == 0 && "N must be a multiple of Bc");
@@ -305,9 +307,9 @@ __global__ void fa_kernel(
                         int col = col_start + j;
                         int k_idx = kv_block_idx * Bc + row;
                         if (k_idx < N && col < d) {
-                            kv_block[col * (Bc + 1) + row] = K[k_idx * d + col];
+                            kv_block[col * (Bc + PAD) + row] = K[k_idx * d + col];
                         } else {
-                            kv_block[col * (Bc + 1) + row] = 0.0f;
+                            kv_block[col * (Bc + PAD) + row] = 0.0f;
                         }
                     }
                 }
@@ -316,7 +318,7 @@ __global__ void fa_kernel(
         __syncthreads();
         
         // Compute scores = Q @ K^T = Br x Bc
-        matmul_warp_tiled<false, THREADS, Wr, Lc>(q_block, kv_block, scores, Br, Bc, d, Bc + 1, Bc + 1);
+        matmul_warp_tiled<false, THREADS, Wr, Lc>(q_block, kv_block, scores, Br, Bc, d, Bc + PAD, Bc + PAD);
         __syncthreads();
         
         // Load V (warp/lane distribution)
@@ -341,7 +343,7 @@ __global__ void fa_kernel(
         __syncthreads();
         
         // Online softmax (Br x Bc) + output accumulation (Br x d)
-        online_softmax_and_accum_output<Br, Bc, THREADS, Wr, Lc>(max_curr, max_prev, sum_exp, scores, output, kv_block, d, inv_sqrt_d);
+        online_softmax_and_accum_output<Br, Bc, THREADS, Wr, Lc>(max_curr, max_prev, sum_exp, scores, output, kv_block, inv_sqrt_d);
         __syncthreads();
         
         // Copy max_curr to max_prev for next iteration (only for rows this warp processes)

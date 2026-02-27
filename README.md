@@ -113,6 +113,9 @@ run
 Or:
 ```bash
 compute-sanitizer ./bin/profile_fa_tc
+
+compute-sanitizer --tool memcheck ./bin/profile_fa_tc_v1 --warmup=1 --runs=1 2>&1 | head -150
+
 ```
 
 ### 5. Notes

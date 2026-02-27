@@ -1,3 +1,5 @@
+#include <math.h>
+
 #ifndef CONFIG_H
 #define CONFIG_H
 
@@ -8,11 +10,10 @@ constexpr int TILE = 16;
 constexpr int Br = 64;             // Query block row size
 constexpr int Bc = 32;             // Key/Value block column size
 
-// Warp-level tile parameters (warp-tiled matmul)
-constexpr int Wr = 16;              // Number of rows handled by one Warp within a block
+// FlashAttention Warp-level tile parameters (warp-tiled matmul)
+constexpr int Wr = 4;              // Number of rows handled by one Warp within a block
 constexpr int Lc = 1;              // Number of columns handled by one Lane within a Warp. TODO: increase to 2
 
-// TODO Profile run: try Lc = 2, 4; Bc = 64 (sram?); 
 
 // Number of CUDA streams for pipelined execution
 constexpr int NSTREAMS = 2;
@@ -26,9 +27,8 @@ constexpr int h = 32;               // Number of attention heads - TODO increase
 static_assert(d_model % h == 0, "d_model must be divisible by h");
 constexpr int d = d_model / h;      // Dimensions per head
 
+
 // Validate warp-tiled matmul configuration
-static_assert(Wr % 16 == 0, "Wr must be a multiple of 16 for Tensor Cores");
-static_assert(Br % Wr == 0, "Br must be a multiple of Wr");
 static_assert(d % (Lc * 32) == 0, "d must be a multiple of (Lc * 32)");
 static_assert(Bc % (Lc * 32) == 0, "Bc must be a multiple of (Lc * 32)");
 

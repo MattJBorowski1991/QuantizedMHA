@@ -1,5 +1,6 @@
 
 
+- tensor cores applied to the mamtuls from FA: Q@K^T and P@V; online softmax is left unchanged
 
 - You cannot / should not assign work to lanes in Tensor Cores, as warp is the atomic execution unit
 
@@ -14,3 +15,6 @@
 - In normal TC WMMA for GEMM one block can even be responsible only for a 16x16 tile (1 block = 1 warp = 32 threads) and hence all the mamtul is done in waves execution. Here in Flash Attention however we are limited by the fact that Br cannot be too large due to SRAM (on L4 anything for Br > 64 is risky) and by the fact that one warp can only handle tile sizes of: 16x16x16, 16x16x8, 32x8x16, 8x32x16, 8x8x32 (MxNxK). For this reason as our first version of TC we take the standard 16x16(x16) tile size and do not split the d-dimension across many warps => one warp owns 16xd of Q in a serialized way. 
 
 - In the next versions of the Tensor Core application we can should try 8x8x32 tile size to increase the number of warps per block.
+
+- padding had to be adjusted from +1 to +16, +32 ... to be 16-byte aligned for Tensor Cores AND element alignment
+- PAD=8 (even though it quarantees 16-byte allignment: ) will not work as the stride needs to be the multiple of WMMA_K so that the result is written in the correct location
