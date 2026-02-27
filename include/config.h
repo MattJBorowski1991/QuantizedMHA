@@ -32,12 +32,6 @@ constexpr int d = d_model / h;      // Dimensions per head
 static_assert(d % (Lc * 32) == 0, "d must be a multiple of (Lc * 32)");
 static_assert(Bc % (Lc * 32) == 0, "Bc must be a multiple of (Lc * 32)");
 
-//Tensor Core parameters
-constexpr int WMMA_M = 16;
-constexpr int WMMA_N = 16;
-constexpr int WMMA_K = 16;
-
-
 // INT8 Quantization parameters
 // Scales set to preserve dynamic range: scale = max_range / 127
 // For constant=1.0 inputs: int8 = round(1.0/scale), dequant = int8*scale
