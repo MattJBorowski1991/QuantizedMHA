@@ -18,7 +18,7 @@ using namespace nvcuda;
 #define THREADS_PER_WARP 32
 #define WARPS_PER_BLOCK 4
 #define FULL_MASK 0xffffffff
-#define PAD 0
+#define PAD 16
 
 //Tensor Core parameters
 constexpr int WMMA_M = 16;

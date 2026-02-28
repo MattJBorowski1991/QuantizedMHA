@@ -16,13 +16,13 @@ using namespace nvcuda;
 // 1 warp owns a 16 x d chunk of Q and performs serial wmma, one 16x16 tile per iteration
 
 #define THREADS_PER_WARP 32
-#define WARPS_PER_BLOCK 4
+#define WARPS_PER_BLOCK 8
 #define FULL_MASK 0xffffffff
 #define PAD 16
 
 //Tensor Core parameters
-constexpr int WMMA_M = 16;
-constexpr int WMMA_N = 16;
+constexpr int WMMA_M = 8;
+constexpr int WMMA_N = 32;
 constexpr int WMMA_K = 16;
 
 static_assert(Br == WMMA_M * WARPS_PER_BLOCK, "Block size needs to equal number of warps times number of rows each warp handles");

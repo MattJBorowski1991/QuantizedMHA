@@ -19,17 +19,19 @@ Implements individual operations of attention separately (Q@K^T, softmax, output
 ### `fa.cu` - FlashAttention-2
 A foundational FlashAttention-2 implementation with fused RoPE (Rotary Position Embeddings) that performs single-pass online softmax computation. Each block processes one Q tile with proper per-query-row normalization, using shared memory for efficient Q, K, V tile management. Each lane within warp owns a 4x4 minitile of Q in a register.
 
-### `fa_int8.cu` - FlashAttention-2 with int8 [WIP]
-Quantization applied to fa
-0. Quantize float→int8 preprocessing: convert float inputs to int8 using scale/zero before main kernel
+### `fa_tc.cu` - FlashAttention-2 with Tensor Cores [WIP]
+Ground work for implementing Tensor Cores with double buffering in Flash Attention. 
+One lane handles a 16x4 mini-tile in register so that one warp can handle a full 16 x d tile of Q.
+
+
+### `fa_tc_int8.cu` - FlashAttention-2 with int8 [WIP]
+
+0. Quantize fp16→int8 preprocessing: convert float inputs to int8 using scale/zero before main kernel
 1. Dequantize on-the-fly in Q@K^T
 2. Handle float x int8 for P@V matmul
 3. Update SRAM layout - less mem needed for int8
 4. Unchanged: softmax
 
-### `fa_16x4.cu` - FlashAttention-2 with Tensor Cores [WIP]
-Ground work for implementing Tensor Cores with double buffering in Flash Attention. 
-One lane handles a 16x4 mini-tile in register so that one warp can handle a full 16 x d tile of Q.
 
 ## Project Structure
 
@@ -221,8 +223,13 @@ Detailed profiling analysis via Nsight Compute, comparing kernel performance acr
 
 ### Run 3: Tensor Cores v1
 
-Run 3 focuses on integrating Tensor Cores (first testing with `16x4` tiles per lane) and eliminating the Mio throttle stalls identified in Run 2.
+Tensor Cores accelerate matmuls (Q@K^T and P@V), delivering a `30.7%` speedup (`8.33ms → 5.77ms`). This first implementation with one warp owning 16 rows of Q (WMMA_M=16) can still be optimized through better warp work distribution, as occupancy is currently bottlenecked at `16.7%`.
 
+**Analysis**: [profiles/md/run3a/ncu_details.md](profiles/md/run3a/ncu_high_level.md)
+
+Furthermore a detailed analysis in Nsight Compute has been done before the next profiling run.
+
+**Analysis**: [profiles/md/run3b/ncu_details.md](profiles/md/run3b/ncu_details.md)
 
 ### Run 4: Tensor Cores v2 [Pending]
 
