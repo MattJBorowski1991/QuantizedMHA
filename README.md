@@ -1,13 +1,13 @@
 # Quantized Multi-Head Attention (QuantizedMHA)
 
-High-performance CUDA implementations of FlashAttention-2 with various optimizations including quantization, Tensor Cores acceleration, and warp specialization.
+High-performance CUDA implementations of FlashAttention-2 with various optimizations including quantization, Tensor Cores and warp specialization.
 
 ## Performance Highlights
 
-- **Unfused baseline**: 6.44 ms total (3 kernels: Q@K^T, softmax, P@V)
-- **FA_4X4**: 9.07 ms (1 fused kernel, currently occupancy-limited at 37%)
+- **Unfused (baseline)**: 6.5 + 2.2 + 5.7 = 14.4 ms total (3 kernels: Q@K^T, softmax, P@V)
+- **Flash Attention**: 8.33 ms (1 fused kernel, currently occupancy-limited at 37%)
+- **Flash Attention with Tensor Cores**: 5.75 ms (1 fused kernel, even lower occupancy)
 - **High occupancy unfused**: 87–100% SM utilization with 65,536 blocks
-- **Identified optimizations**: 53% potential speedup via bank conflict reduction, 44% via occupancy improvements
 
 For detailed profiling analysis, see [Profiling Results](#profiling-results) below.
 
@@ -17,14 +17,12 @@ For detailed profiling analysis, see [Profiling Results](#profiling-results) bel
 Implements individual operations of attention separately (Q@K^T, softmax, output projection) as standalone kernels rather than fusing them into a single kernel. This modular approach allows flexibility in optimization and profiling of individual attention components.
 
 ### `fa.cu` - FlashAttention-2
-A foundational FlashAttention-2 implementation with fused RoPE (Rotary Position Embeddings) that performs single-pass online softmax computation. Each block processes one Q tile with proper per-query-row normalization, using shared memory for efficient Q, K, V tile management. Each lane within warp owns a 4x4 minitile of Q in a register.
+A foundational FlashAttention-2 implementation with fused RoPE (Rotary Position Embeddings) that performs single-pass online softmax computation. Each block processes one Q tile with proper per-query-row normalization, using shared memory for efficient Q, K, V tile management. Each lane within warp owns a 4x1 minitile of Q in a register, hence each warp owns 4x32 and processes 4xd of Q in a block-strided way.
 
-### `fa_tc.cu` - FlashAttention-2 with Tensor Cores [WIP]
-Ground work for implementing Tensor Cores with double buffering in Flash Attention. 
-One lane handles a 16x4 mini-tile in register so that one warp can handle a full 16 x d tile of Q.
+### `fa_tc_v1.cu` - FlashAttention-2 with Tensor Cores
+Matmuls in fa.cu are replaced by TC WMMA with standard tile sizes of 16x16x16. One warp owns a 16 x d tile of Q in a serialized way by processing one tile at a time.
 
-
-### `fa_tc_int8.cu` - FlashAttention-2 with int8 [WIP]
+### `fa_tc_v2.cu` - FlashAttention-2 with more warps and quantization [WIP]
 
 0. Quantize fp16→int8 preprocessing: convert float inputs to int8 using scale/zero before main kernel
 1. Dequantize on-the-fly in Q@K^T
@@ -122,31 +120,6 @@ compute-sanitizer --tool memcheck ./bin/profile_fa_tc_v1 --warmup=1 --runs=1 2>&
 
 ### 5. Notes
 
-#### 5.1. Shared memory in `fa.cu`
-Requires `(2×Br×d + (Bc+1)×d + Br×(Bc+1) + 3×Br) × sizeof(float)` (exact per-buffer allocation).
-
-With **d=64, Bc=32**:
-- **Br=128**: ~92.4 KB (exceeds 96 KB GPU limit slightly)
-- **Br=64**: **50.4 KB** (current config, fits comfortably, 2 blocks/SM max)
-- **Br=32**: ~29.4 KB (fits safely, allows ~3 blocks/SM if registers permit)
-
-**Note**: Current Br=64 is optimal for future Tensor Cores (16-row warp granularity). Occupancy bottleneck is registers (64/thread), not SRAM.
-
-#### 5.2. Warps in FA2 and TC WMMA
-
-- If based on fa.cu we want to implement correct TC WMMA in fa_tc.cu, we need 16×16 tiles in Q, K, V to be served by one warp.
-
-- In the beginning in fa.cu one warp owns (warp_rows × d) = (4 × d) of Q and does a warp-stride across all columns d to calculate the matmuls, online softmax and final per-row scaled dot product.
-
-- For this reason warp_rows needs to be a multiple of 16, let's take warp_rows = 16.
-
-- If warp_rows = 16, then Br has to be a multiple of warp_rows:
-
-For N = 4096, d = 2048, h = 32 (past config):
-- **Br=32**: 2 warps per block, ~33KB shared mem ✓
-- **Br=48**: 3 warps per block, ~50KB shared mem ✓
-- **Br=64**: 4 warps per block, ~66KB shared mem (kernel fails silently) ✗
-
 
 #### 5.3. Quantization Workflow
 
@@ -225,11 +198,11 @@ Detailed profiling analysis via Nsight Compute, comparing kernel performance acr
 
 Tensor Cores accelerate matmuls (Q@K^T and P@V), delivering a `30.7%` speedup (`8.33ms → 5.77ms`). This first implementation with one warp owning 16 rows of Q (WMMA_M=16) can still be optimized through better warp work distribution, as occupancy is currently bottlenecked at `16.7%`.
 
-**Analysis**: [profiles/md/run3a/ncu_details.md](profiles/md/run3a/ncu_high_level.md)
+**Comparison to Flash Attention ex Tensor Cores**: [profiles/md/run3a/ncu_details.md](profiles/md/run3a/ncu_high_level.md)
 
 Furthermore a detailed analysis in Nsight Compute has been done before the next profiling run.
 
-**Analysis**: [profiles/md/run3b/ncu_details.md](profiles/md/run3b/ncu_details.md)
+**Nsight Compute Analysis**: [profiles/md/run3b/ncu_details.md](profiles/md/run3b/ncu_details.md)
 
 ### Run 4: Tensor Cores v2 [Pending]
 

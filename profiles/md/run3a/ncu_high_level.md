@@ -4,6 +4,8 @@
 
 This document presents a performance analysis comparing the original Flash Attention kernel (`fa`) with a Tensor Core-optimized variant (`fa_tc_v1`). The tensor core implementation targets the matrix multiplications in the attention mechanism (Q@K^T and P@V), while leaving online softmax computation unchanged. The tensor core approach achieves **30.7% runtime reduction** (8.33ms → 5.77ms) on `N = 8192`, `d_model = 1024` (embedding dimension) and `h = 32` (number of heads).
 
+See code here: ![fa_tc_v1.cu](../../../mha_kernels/fa_tc_v1.cu)
+
 ---
 
 ## Implementation Overview

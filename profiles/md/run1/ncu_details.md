@@ -8,6 +8,8 @@
 | Achieved occupancy | **44%** | 37.1% vs 66.7% theoretical |
 | Theoretical occupancy | **33%** | Register and shared memory limits |
 
+See code here: ![unfused.cu](../../../mha_kernels/unfused.cu)
+
 ---
 
 ## I. Shared Store Bank Conflicts — Est. Speedup = 53%

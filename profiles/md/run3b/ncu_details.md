@@ -1,5 +1,7 @@
 # Detailed Analysis of fa_tc_v1 in Nsight Compute
 
+See code here: ![fa_tc_v1.cu](../../../mha_kernels/fa_tc_v1.cu)
+
 ## Main Bottlenecks Detected 
 
 ### 1. Theoretical Occupancy — Est. Speedup: 54.01%

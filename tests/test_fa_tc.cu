@@ -15,11 +15,16 @@ do { \
 } while(0)
 
 // Compile: 
-// nvcc -O3 -gencode arch=compute_89,code=sm_89 -I. -I./include tests/test_fa_tc_v1.cu -o bin/test_fa_tc_v1 2>&1 | head -50
+// nvcc -O3 -gencode arch=compute_89,code=sm_89 -I. -I./include tests/test_fa_tc.cu -o bin/test_fa_tc 2>&1 | head -50
 
 
-// Include wmma_A_B from fa_tc_v1.cu
-#include "../mha_kernels/fa_tc_v1.cu"
+// Include wmma_A_B from fa_tc_v2.cu
+#include "../mha_kernels/fa_tc_v2.cu"
+
+// Compile-time constant for threads per block
+// WARPS_PER_BLOCK and THREADS_PER_WARP are defined in fa_tc_v2.cu
+// THREADS = WARPS_PER_BLOCK * THREADS_PER_WARP
+constexpr int TEST_THREADS = WARPS_PER_BLOCK * THREADS_PER_WARP;
 
 // Wrapper kernel to test wmma_A_B
 template <int THREADS, int M, int N, int K>
@@ -28,34 +33,36 @@ __global__ void test_wmma_kernel(
     const half* B,
     float* C
 ) {
+    // Shared memory scratch buffer for inter-warp communication in wmma_A_B
+    // Size: (M/WMMA_M/2) pairs * 2 tiles per pair * WMMA_M * N floats
+    extern __shared__ float c_scratch[];
+    
     // Strides must match actual memory layout with padding: A is M×K, B is K×N, C is M×N
     // K and N include padding, so stride = K for A, stride = N for B, stride = N for C
-    wmma_A_B<false, THREADS, M, N, K>(A, B, C, K, N, N);
+    wmma_A_B<false, THREADS, M, N, K>(A, B, C, c_scratch, K, N, N);
 }
 
 int main() {
     printf("========================================\n");
-    printf("Testing wmma_A_B from fa_tc_v1.cu\n");
+    printf("Testing wmma_A_B from fa_tc_v2.cu\n");
     printf("========================================\n\n");
 
 
-    // Test configuration
-    const int TEST_PAD = 16;
-    const int M = Br;  // A: M x K 
-    const int K = WMMA_K + TEST_PAD;  // A: M x K, B: K x N
-    const int N = WMMA_N + TEST_PAD;  // B: K x N, C: M x N
+    // Test configuration (using constants from fa_tc_v2.cu)
+    const int M = Br;  // A: M x K (Br rows)
+    const int K = d + PAD;  // A: M x K (d columns with padding)
+    const int N = Bc + PAD;  // B: K x N (Bc columns with padding), C: M x N
     
     printf("BEFORE PADDING:\n");
-    printf("  A: %d x %d\n", M, WMMA_K);
-    printf("  B: %d x %d\n", WMMA_K, WMMA_N);
-    printf("  C: %d x %d\n\n", M, WMMA_N);
+    printf("  A: %d x %d\n", M, d);
+    printf("  B: %d x %d\n", d, Bc);
+    printf("  C: %d x %d\n\n", M, Bc);
     
     printf("AFTER PADDING (stride includes padding):\n");
     printf("  A: %d x %d (half precision, stride=%d)\n", M, K, K);
     printf("  B: %d x %d (half precision, stride=%d)\n", K, N, N);
     printf("  C: %d x %d (float, result, stride=%d)\n\n", M, N, N);
-    printf("Padding: %d columns per row\n", PAD);
-    printf("Expected result: Each element = %d (dot product of %d ones)\n\n", WMMA_K, WMMA_K);
+    printf("Expected result: Each element = %d (dot product of %d ones)\n\n", d, d);
 
     size_t size_A = M * K * sizeof(half);
     size_t size_B = K * N * sizeof(half);
@@ -67,21 +74,21 @@ int main() {
     float *h_C = (float*)malloc(size_C);
 
     // Initialize: valid columns = 1.0, padding columns = 0.0
-    printf("Initializing matrices with padding...\n");
-    // A: M x K, first WMMA_K cols = 1.0, last PAD cols = 0.0
+    printf("Initializing matrices...\n");
+    // A: M x K, first d cols = 1.0, last PAD cols = 0.0
     for (int i = 0; i < M; i++) {
         for (int j = 0; j < K; j++) {
-            if (j < WMMA_K) {
+            if (j < d) {
                 h_A[i * K + j] = __float2half(1.0f);
             } else {
                 h_A[i * K + j] = __float2half(0.0f);
             }
         }
     }
-    // B: K x N, valid region is WMMA_K x WMMA_N = 1.0, rest = 0.0
+    // B: K x N, valid region is d x Bc = 1.0, rest = 0.0
     for (int i = 0; i < K; i++) {
         for (int j = 0; j < N; j++) {
-            if (i < WMMA_K && j < WMMA_N) {
+            if (i < d && j < Bc) {
                 h_B[i * N + j] = __float2half(1.0f);
             } else {
                 h_B[i * N + j] = __float2half(0.0f);
@@ -106,8 +113,16 @@ int main() {
 
     // Launch kernel
     printf("Launching WMMA kernel...\n");
-    int threads_per_block = WARPS_PER_BLOCK * THREADS_PER_WARP;  // 8 warps * 32 threads (match WARPS_PER_BLOCK=8)
-    test_wmma_kernel<256, M, N, K><<<1, threads_per_block>>>(d_A, d_B, d_C);
+    constexpr int threads_per_block = TEST_THREADS;  // WARPS_PER_BLOCK * THREADS_PER_WARP
+    printf("  Threads per block: %d (WARPS_PER_BLOCK=%d)\n", threads_per_block, WARPS_PER_BLOCK);
+    
+    // Calculate scratch buffer size: (WARPS_PER_BLOCK / 2) pairs * 2 tiles per pair * WMMA_M * N floats
+    int num_pairs = WARPS_PER_BLOCK / 2;
+    size_t scratch_size = num_pairs * 2 * WMMA_M * N * sizeof(float);
+    printf("  Num pairs: %d, Scratch buffer size: %zu floats\n", num_pairs, scratch_size / sizeof(float));
+    
+    // Template parameter must be compile-time constant
+    test_wmma_kernel<TEST_THREADS, M, N, K><<<1, threads_per_block, scratch_size>>>(d_A, d_B, d_C);
     checkCudaErrors(cudaDeviceSynchronize());
 
     // Copy result back
@@ -118,7 +133,7 @@ int main() {
     for (int i = 0; i < M; i++) {
         printf("Row %2d: ", i);
         for (int j = 0; j < K; j++) {
-            if (j == WMMA_K) printf("| ");  // Mark padding boundary
+            if (j == d) printf("| ");  // Mark padding boundary
             printf("%.1f ", __half2float(h_A[i * K + j]));
         }
         printf("\n");
@@ -127,9 +142,8 @@ int main() {
     printf("\n========== Matrix B (all rows and cols) ==========\n");
     for (int i = 0; i < K; i++) {
         printf("Row %2d: ", i);
-        if (i == WMMA_K) printf("(padding)\n");
         for (int j = 0; j < N; j++) {
-            if (j == WMMA_N) printf("| ");  // Mark padding boundary
+            if (j == Bc) printf("| ");  // Mark padding boundary
             printf("%.1f ", __half2float(h_B[i * N + j]));
         }
         printf("\n");
@@ -137,18 +151,18 @@ int main() {
 
     printf("\n========== Result C (A @ B) ==========\n");
     bool all_correct = true;
-    int expected = WMMA_K;  // Only valid columns contribute
+    int expected = d;  // Only valid columns contribute
     for (int i = 0; i < M; i++) {
         printf("Row %2d: ", i);
         for (int j = 0; j < N; j++) {
             float val = h_C[i * N + j];
             printf("%.1f ", val);
-            // Check if result is approximately WMMA_K (16)
-            if (j < WMMA_N && (val < expected - 0.5f || val > expected + 0.5f)) {
+            // Check if result is approximately d (product of d ones)
+            if (j < Bc && (val < expected - 0.5f || val > expected + 0.5f)) {
                 all_correct = false;
             }
             // Padding region should be 0
-            if (j >= WMMA_N && val > 0.1f) {
+            if (j >= Bc && val > 0.1f) {
                 all_correct = false;
             }
         }
@@ -156,7 +170,7 @@ int main() {
     }
 
     printf("\n========== Verification ==========\n");
-    printf("Expected: Valid region (first %d cols) = %d, Padding region = 0\n", WMMA_N, expected);
+    printf("Expected: Valid region (first %d cols) = %d, zero elsewhere\n", Bc, expected);
     if (all_correct) {
         printf("Result: PASS ✓\n");
     } else {

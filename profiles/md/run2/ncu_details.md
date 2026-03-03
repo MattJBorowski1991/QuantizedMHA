@@ -11,6 +11,8 @@ Run 2 focused on optimizing the Flash Attention kernel to address bottlenecks id
 - **Register Pressure Reduction**: Statically scoped variables were replaced with runtime values, leveraging compile-time constants and static assertions where possible.
 - **Increased Sequence Length**: Sequence length was scaled from `N=4096` to `N=8192` to keep the device busy (increase the number of blocks from `64` to `128` and hence increase Waves per SM from `0.55` to `0.74`)
 
+See code here: ![fa.cu](../../../mha_kernels/fa.cu)
+
 ### Key Results
 
 - **Latency Improvement**: Flash Attention latency is now 74% lower than the unfused baseline (41% higher in Run 1).
