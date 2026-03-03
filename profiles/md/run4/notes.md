@@ -1,5 +1,10 @@
 0. assumption is that we want more warps to "fit" in the Br-dimension, so we take the wmma tile size of 8x32x16 instead of 16x16x16
 
+we compare:
+
+fa_tc_v1a = tile size 8x32x16 instead of 16x16x16
+fa_tc_v2 = distribute warp work accross d-dimension in Q - described below.
+
 1. first approach to warp-work distribution accross the d-dimension: splitting the work between 2 warps = one owns the left half, the other owns the right half. This way with Br=64 and a 8x32x16 Tensor Core tile we have 16 warps working instead of 8 before. 
 
 2. Need to accumulate the "left" result and the "right" result and at the end add them together.
