@@ -28,7 +28,7 @@ Increase warp occupancy in the Br-dimension by using 8×32×16 WMMA tile size in
 - **fa_tc_v2** (`mha_kernels/fa_tc_v2.cu`): Two warps own 8×d of Q, PAD=0 (causes SRAM overflow when PAD=16)
 
 **Bottleneck Visualization:**  
-![Bottlenecks](images/run4/v1a_pad16_vs_v2_pad0_bottlenecks.png)
+![Bottlenecks](../../images/run4/v1a_pad16_vs_v2_pad0_bottlenecks.png)
 
 ### Additional Validation Run
 
@@ -40,27 +40,27 @@ An extra run with **Br=32** (instead of 64), **4×2 = 8 warps** per block, **PAD
 
 - **Compute vs Memory Throughput:**  
   Compute throughput decreased — bank conflicts negate the benefit of doubling warps. Memory throughput as a percentage of peak rose slightly, but absolute memory bandwidth (MB/s) fell ~30%.  
-  Image: [Compute and Memory Throughput](images/run4/v1a_pad16_vs_v2_pad0_thoughput.png)
+  Image: [Compute and Memory Throughput](../../images/run4/v1a_pad16_vs_v2_pad0_thoughput.png)
 
 - **Bank Conflicts:**  
   ≈3‑way bank conflicts on both shared loads and stores, accounting for ~54–67% of affected wavefronts. These conflicts drive serialization and throughput loss.  
-  Image: [Bank Conflicts](images/run4/v1a_pad16_vs_v2_pad0_bank_conflicts.png)
+  Image: [Bank Conflicts](../../images/run4/v1a_pad16_vs_v2_pad0_bank_conflicts.png)
 
 - **Scheduler Statistics:**  
   Active/theoretical warps roughly doubled as expected, but Eligible warps rose only ~35% and issued work decreased — indicating stalls or resource contention reducing effective issue rate.  
-  Image: [Scheduler Statistics](images/run4/v1a_pad16_vs_v2_pad0_scheduler_stats.png)
+  Image: [Scheduler Statistics](../../images/run4/v1a_pad16_vs_v2_pad0_scheduler_stats.png)
 
 - **Warp State Statistics:**  
   Warp cycles per issued instruction increased >120%, driven by Stall Barrier and Stall MIO Throttle spikes. This explains much of the lost throughput.  
-  Image: [Warp State Statistics](images/run4/v1a_pad16_vs_v2_pad0_warp_state_stats.png)
+  Image: [Warp State Statistics](../../images/run4/v1a_pad16_vs_v2_pad0_warp_state_stats.png)
 
 - **Occupancy:**  
   Occupancy increased ~100% when splitting work across the d‑axis. Only ~5 KB of additional SRAM remains usable before occupancy drops by ~50% (SRAM pressure is tight).  
-  Images: [Occupancy 1](images/run4/v1a_pad16_vs_v2_pad0_occupancy_1.png) • [Occupancy 2](images/run4/v1a_pad16_vs_v2_pad0_occupancy_2.png)
+  Images: [Occupancy 1](../../images/run4/v1a_pad16_vs_v2_pad0_occupancy_1.png) • [Occupancy 2](../../images/run4/v1a_pad16_vs_v2_pad0_occupancy_2.png)
 
 - **Source Counters:**  
   Large number of branch/source instructions attributable to uncoalesced shared accesses that map multiple threads to the same shared‑memory banks (causing bank conflicts and serialization). See source counter heatmap and code links for hotspots.  
-  Image: [Source Counters](images/run4/v1a_pad16_vs_v2_pad0_source_counters.png)
+  Image: [Source Counters](../../images/run4/v1a_pad16_vs_v2_pad0_source_counters.png)
 
 ## Notes
 
