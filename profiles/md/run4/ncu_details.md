@@ -40,7 +40,7 @@ An extra run with **Br=32** (instead of 64), **4×2 = 8 warps** per block, **PAD
 
 - **Compute vs Memory Throughput:**  
   Compute throughput decreased — bank conflicts negate the benefit of doubling warps. Memory throughput as a percentage of peak rose slightly, but absolute memory bandwidth (MB/s) fell ~30%.  
-  [Compute and Memory Throughput](../../images/run4/v1a_pad16_vs_v2_pad0_thoughput.png)
+[Compute and Memory Throughput](../../images/run4/v1a_pad16_vs_v2_pad0_thoughput.png)
 
 - **Bank Conflicts:**  
   ≈3‑way bank conflicts on both shared loads and stores, accounting for ~54–67% of affected wavefronts. These conflicts drive serialization and throughput loss.  
