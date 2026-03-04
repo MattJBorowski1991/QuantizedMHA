@@ -1,4 +1,6 @@
-# Nsight Compute Profiling Details (Run 2)
+# Nsight Compute - Detailed Analysis
+
+Kernels profiled: [unfused.cu](../../../mha_kernels/unfused.cu) and [fa.cu](../../../mha_kernels/fa.cu) (post-optimization).
 
 ## Extended Summary
 

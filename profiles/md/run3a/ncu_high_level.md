@@ -1,4 +1,6 @@
-# Flash Attention with Tensor Cores - Performance Analysis
+# NCU High-Level Performance Comparison
+
+Kernels profiled: [fa.cu](../../../mha_kernels/fa.cu) and [fa_tc_v1.cu](../../../mha_kernels/fa_tc_v1.cu).
 
 ## Executive Summary
 

@@ -19,24 +19,51 @@ High-performance CUDA implementations of FlashAttention-2 with various optimizat
 
 For detailed profiling analysis, see [Profiling Results](#profiling-results) below.
 
-## Kernels
+## Profiling Results
 
-### `unfused.cu` - Unfused Attention Components
-Implements individual operations of attention separately (Q@K^T, softmax, output projection) as standalone kernels rather than fusing them into a single kernel. This modular approach allows flexibility in optimization and profiling of individual attention components.
+Detailed profiling analysis via Nsight Compute, comparing kernel performance across unfused vs fused attention implementations.
 
-### `fa.cu` - FlashAttention-2
-A foundational FlashAttention-2 implementation with fused RoPE (Rotary Position Embeddings) that performs single-pass online softmax computation. Each block processes one Q tile with proper per-query-row normalization, using shared memory for efficient Q, K, V tile management. Each lane within warp owns a 4x1 minitile of Q in a register, hence each warp owns 4x32 and processes 4xd of Q in a block-strided way.
+### Run 1: Unfused vs FA
 
-### `fa_tc_v1.cu` - FlashAttention-2 with Tensor Cores
-Matmuls in fa.cu are replaced by TC WMMA with standard tile sizes of 16x16x16. One warp owns a 16 x d tile of Q in a serialized way by processing one tile at a time.
+Comparative profiling of three unfused attention components (`mma_A_Bt`, `softmax`, `mma_A_B`) and the fused FA implementation.
 
-### `fa_tc_v2.cu` - FlashAttention-2 with more warps and quantization [WIP]
+**Detailed Analysis**: [profiles/md/run1/ncu_details.md](profiles/md/run1/ncu_details.md)
 
-0. Quantize fp16→int8 preprocessing: convert float inputs to int8 using scale/zero before main kernel
-1. Dequantize on-the-fly in Q@K^T
-2. Handle float x int8 for P@V matmul
-3. Update SRAM layout - less mem needed for int8
-4. Unchanged: softmax
+### Run 2: Unfused vs FA after optimizations
+
+Removed bank conflicts, unified warp/lane work, reduced Shared Memory usage and register pressure. 
+
+**Detailed Analysis**: [profiles/md/run2/ncu_details.md](profiles/md/run2/ncu_details.md)
+
+### Run 3a: Tensor Cores: first implementation
+
+First implementation with the standard tile size of `16x16x16` and one warp owning `16 x d` of `Q` in a serialized way.
+
+Kernels profiled: [fa.cu](../../../mha_kernels/fa.cu) and [fa_tc_v1.cu](../../../mha_kernels/fa_tc_v1.cu).
+.
+**High Level Comparison**: [profiles/md/run3a/ncu_details.md](profiles/md/run3a/ncu_high_level.md)
+
+### Run 3b: Tensor Cores: Nsight Compute analysis
+
+Kernels profiled: [fa_tc_v1.cu](../../../mha_kernels/fa_tc_v1.cu).
+
+**Detailed Analysis**: [profiles/md/run3b/ncu_details.md](profiles/md/run3b/ncu_details.md)
+
+### Run 4: Tensor Cores: more warps working
+
+Kernels profiled: [fa_tc_v1a.cu](../../../mha_kernels/fa_tc_v1a.cu) and [fa_tc_v2.cu](../../../mha_kernels/fa_tc_v2.cu).
+
+Changed WMMA tile size to 8x32x16. Distributed warp work across d-dimension of Q to two warps.
+
+**Detailed Analysis**: [profiles/md/run4/ncu_details.md](profiles/md/run4/ncu_details.md)
+
+### Run 5: Tensor Cores: remove bank conflicts
+
+Optimized SRAM usage in to enable `PAD=8` or `PAD=16` and eliminate bank conflicts.
+
+Kernels profiled: [fa_tc_v2.cu](../../../mha_kernels/fa_tc_v2.cu) and [fa_tc_v2a.cu](../../../mha_kernels/fa_tc_v2a.cu).
+
+**Detailed Analysis**: [profiles/md/run5/ncu_details.md](profiles/md/run5/ncu_details.md)
 
 
 ## Project Structure
@@ -126,96 +153,12 @@ compute-sanitizer --tool memcheck ./bin/profile_fa_tc_v1 --warmup=1 --runs=1 2>&
 
 ```
 
-### 5. Notes
+## Notes
 
+#### Quantization Workflow
 
-#### 5.3. Quantization Workflow
-
-```
-Inputs (float32)
-  ↓ [Pre-quantize]
-Q, K, V (int8)
-  ↓ [QK^T: int8 @ int8]
-Scores (float32 after upcast)
-  ↓ [Softmax]
-Probs (float32)
-  ↓ [P @ V: float32 @ int8]
-Output (float32)
-```
-
-**Note**: We don't quantize P because it's already a probability (small numbers 0–1).
-
-#### 5.3. Correctness check for d=1024/16=64; Br=64; Bc=32:
-
-(after first K, V tile pair)
-1.1. Q_tile @ K_tile ^T = (64 x 64) x (64 x 32) = (64×32) with all values 64
-1.2. Scale by 1/sqrt(d) = 1/8 => all values 8 == scores
-and sum_exp = 32 x exp(8-8) = 32
-1.3. P_tile = Softmax_rowwise(scores) = (64 x 32) with all values 1/32 
-1.4. P_tile @ V_tile = (64×32) x (32x64) = (64 x 64) with all values 1 = output
-
-(after second K, V tile pair)
-sum_exp = 64
-output = (64 x 64) with all values 2
-
-..
-
-(after 128th K,V tile pair)
-sum_exp = 4096
-output = (64 x 64) with all values 128
-
-=> final output = (64 x 64 with all values) 128 / 4096
-
----
-
-## Profiling Results
-
-Detailed profiling analysis via Nsight Compute, comparing kernel performance across unfused vs fused attention implementations.
-
-### Run 1: Unfused vs FA_4X4 Baseline
-
-**Summary**: Comparative profiling of three unfused attention components (`mma_A_Bt`, `softmax`, `mma_A_B`) and the fused FA_4X4 implementation.
-
-**Key Findings**:
-- **Unfused total latency**: 6.44 ms (3 kernels)
-- **FA_4X4 latency**: 9.07 ms (1 kernel, 1.4× slower)
-- **Occupancy**: Unfused 87–100%, FA_4X4 only 37%
-- **Grid utilization**: Unfused 65,536 blocks, FA_4X4 only 64 blocks
-- **Root cause**: FA_4X4 limited by register pressure (64 regs/thread) and large SRAM (33.54 KB)
-
-**Top Optimization Opportunities**:
-1. **Shared store bank conflicts** (est. speedup 53%) — 68.56% of stores affected
-2. **Achieved occupancy** (est. speedup 44%) — 37% vs 67% theoretical
-3. **Theoretical occupancy** (est. speedup 33%) — register and SRAM limits
-
-**Full Analysis**: [profiles/md/run1/ncu_details.md](profiles/md/run1/ncu_details.md)
-
-### Run 2: Flash Attention Kernel Optimizations
-
-**Summary**: Significant improvements achieved by removing bank conflicts, unifying warp/lane work, and reducing Shared Memory usage and register pressure. 
-
-**Results**: `74%` latency reduction compared to the unfused baseline and a `99%` L2 cache hit rate. Waves up from `0.55` to `0.74`. Remaining bottlenecks include Mio throttle stalls and occupancy limitations.
-
-**Status**:
-- Preparing architecture for Tensor Cores (each warp handling `16×d` or `32×d` tiles) and quantization.
-- Block requirements: At least `64×d` per block for Tensor Core compatibility.
-
-**Detailed Analysis**: [profiles/md/run2/ncu_details.md](profiles/md/run2/ncu_details.md)
-
-### Run 3: Tensor Cores v1
-
-Tensor Cores accelerate matmuls (Q@K^T and P@V), delivering a `30.7%` speedup (`8.33ms → 5.77ms`). This first implementation with one warp owning 16 rows of Q (WMMA_M=16) can still be optimized through better warp work distribution, as occupancy is currently bottlenecked at `16.7%`.
-
-**Comparison to Flash Attention ex Tensor Cores**: [profiles/md/run3a/ncu_details.md](profiles/md/run3a/ncu_high_level.md)
-
-Furthermore a detailed analysis in Nsight Compute has been done before the next profiling run.
-
-**Nsight Compute Analysis**: [profiles/md/run3b/ncu_details.md](profiles/md/run3b/ncu_details.md)
-
-### Run 4: Tensor Cores v2 [Pending]
-
-Run 4 focuses on spreading the work of 16 x d between 2 warps: 
-Warp0 owns 16 x [0, d/2] 
-Warp1 owns 16 x [d/2 + 1, d]
-
-
+0. Quantize fp16→int8 preprocessing: convert float inputs to int8 using scale/zero before main kernel
+1. Dequantize on-the-fly in Q@K^T
+2. Handle float x int8 for P@V matmul
+3. Update SRAM layout - less mem needed for int8
+4. Unchanged: softmax

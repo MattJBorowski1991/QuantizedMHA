@@ -1,4 +1,6 @@
-# Detailed Analysis — fa_tc_v2 vs fa_tc_v2a (Nsight Compute)
+# Nsight Compute - Detailed Analysis
+
+Kernels profiled: [fa_tc_v2.cu](../../../mha_kernels/fa_tc_v2.cu) and [fa_tc_v2a.cu](../../../mha_kernels/fa_tc_v2a.cu).
 
 ## Goal
 

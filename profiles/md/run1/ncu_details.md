@@ -1,4 +1,6 @@
-# Nsight Compute Analysis: fa_4x4 Flash Attention Kernel
+# Nsight Compute - Detailed Analysis
+
+Kernels profiled: [unfused.cu](../../../mha_kernels/unfused.cu) and [fa.cu](../../../mha_kernels/fa.cu).
 
 ## Summary of Top Optimization Opportunities
 
@@ -130,7 +132,7 @@ Active DRAM cycles dropped to **3–5%** compared to unfused kernels, indicating
 
 ## Summary
 
-The fa_4x4 kernel demonstrates how **architectural constraints compound**:
+The fa kernel demonstrates how **architectural constraints compound**:
 
 1. **Bank conflicts** destroy shared memory throughput (68.56% of stores affected)
 2. **Register pressure** limits occupancy to 37%, preventing sufficient wavefront hiding
@@ -139,4 +141,4 @@ The fa_4x4 kernel demonstrates how **architectural constraints compound**:
 
 Addressing any single issue without solving the others provides limited speedup. The interconnected nature of CUDA performance tuning is evident here.
 
-For high level comparison of profiling results of `unfused` vs `fa_4x4` see: [ncu_highlevel.md](ncu_highlevel.md).
+For high level comparison of profiling results of `unfused` vs `fa` see: [ncu_highlevel.md](ncu_highlevel.md).

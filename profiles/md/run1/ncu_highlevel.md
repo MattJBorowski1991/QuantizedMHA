@@ -1,12 +1,14 @@
-# Nsight Compute Profiling Comparison (run1)
+# NCU High-Level Performance Comparison
 
-High level performance metrics comparing unfused attention components vs fused FA_4X4 implementation.
+Kernels profiled: [unfused.cu](../../../mha_kernels/unfused.cu) and [fa.cu](../../../mha_kernels/fa.cu).
+
+High level performance metrics comparing unfused attention components vs fused fa implementation.
 
 ---
 
 ## GPU Speed Of Light Throughput
 
-| | Unfused | | | FA_4X4 |
+| | Unfused | | | fa |
 |---|---|---|---|---|
 | Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
 | DRAM Frequency (Ghz) | 6.24 | 6.24 | 6.24 | 6.24 |
@@ -28,7 +30,7 @@ High level performance metrics comparing unfused attention components vs fused F
 
 ## PM Sampling
 
-| | Unfused | | | FA_4X4 |
+| | Unfused | | | fa |
 |---|---|---|---|---|
 | Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
 | Maximum Buffer Size (Mbyte) | 50.33 | 25.17 | 50.33 | 28.84 |
@@ -40,7 +42,7 @@ High level performance metrics comparing unfused attention components vs fused F
 
 ## Compute Workload Analysis
 
-| | Unfused | | | FA_4X4 |
+| | Unfused | | | fa |
 |---|---|---|---|---|
 | Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
 | Executed Ipc Active (inst/c) | 1.46 | 0.97 | 1.56 | 2.02 |
@@ -58,7 +60,7 @@ High level performance metrics comparing unfused attention components vs fused F
 
 ## Memory Workload Analysis
 
-| | Unfused | | | FA_4X4 |
+| | Unfused | | | fa |
 |---|---|---|---|---|
 | Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
 | Memory Throughput | 19.00 Gbyte/s | 262.49 Gbyte/s | 37.00 Gbyte/s | 416.51 Mbyte/s |
@@ -86,7 +88,7 @@ High level performance metrics comparing unfused attention components vs fused F
 
 ## Scheduler Statistics
 
-| | Unfused | | | FA_4X4 |
+| | Unfused | | | fa |
 |---|---|---|---|---|
 | Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
 | One or More Eligible (%) | 36.55 | 24.19 | 39.07 | 50.48 |
@@ -106,7 +108,7 @@ High level performance metrics comparing unfused attention components vs fused F
 
 ## Warp State Statistics
 
-| | Unfused | | | FA_4X4 |
+| | Unfused | | | fa |
 |---|---|---|---|---|
 | Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
 | Warp Cycles Per Issued Instr | 32.18 | 47.09 | 27.00 | 8.83 |
@@ -125,7 +127,7 @@ High level performance metrics comparing unfused attention components vs fused F
 
 ## Instruction Statisticsthe 
 
-| | Unfused | | | FA_4X4 |
+| | Unfused | | | fa |
 |---|---|---|---|---|
 | Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
 | Avg. Executed Instr Per Sched | 919763.86 | 91489.10 | 859665.66 | 2195377.66 |
@@ -140,7 +142,7 @@ High level performance metrics comparing unfused attention components vs fused F
 
 ## Launch Statistics
 
-| | Unfused | | | FA_4X4 |
+| | Unfused | | | fa |
 |---|---|---|---|---|
 | Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
 | Block Size | 256 | 256 | 256 | 512 |
@@ -167,7 +169,7 @@ High level performance metrics comparing unfused attention components vs fused F
 
 ## Occupancy
 
-| | Unfused | | | FA_4X4 |
+| | Unfused | | | fa |
 |---|---|---|---|---|
 | Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
 | Block Limit SM | 24 | 24 | 24 | 24 |
@@ -194,7 +196,7 @@ High level performance metrics comparing unfused attention components vs fused F
 
 ## GPU and Memory Workload Distribution
 
-| | Unfused | | | FA_4X4 |
+| | Unfused | | | fa |
 |---|---|---|---|---|
 | Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
 | Average DRAM Active Cycles | 1243242.67 | 2638565.33 | 2171085.33 | 78736 |
@@ -208,7 +210,7 @@ High level performance metrics comparing unfused attention components vs fused F
 | Average SMSP Active Cycles | 2517000.12 | 378659.44 | 2200947.55 | 4354909.20 |
 | Total SMSP Elapsed Cycles | 584663056 | 89112408 | 524323192 | 1692387480 |
 
-  FA_4X4:
+  fa:
     fa_kernel:
       OPT   Est. Speedup: 23.86%
             One or more SMs have a much higher number of active cycles than the average number of active cycles. Maximum
@@ -228,7 +230,7 @@ High level performance metrics comparing unfused attention components vs fused F
 
 ## Source Counters
 
-| | Unfused | | | FA_4X4 |
+| | Unfused | | | fa |
 |---|---|---|---|---|
 | Metric Name | mma_A_Bt | softmax | mma_A_B | fa_kernel |
 | Branch Instructions Ratio (%) | 0.10 | 0.10 | 0.09 | 0.05 |
@@ -236,7 +238,7 @@ High level performance metrics comparing unfused attention components vs fused F
 | Branch Efficiency (%) | 100 | 100 | 100 | 98.67 |
 | Avg. Divergent Branches | 0 | 0 | 0 | 1129.93 |
 
-  FA_4X4:
+  fa:
     fa_kernel:
       OPT   Est. Speedup: 16.06%
             This kernel has uncoalesced shared accesses resulting in a total of 33030144 excessive wavefronts (27% of the

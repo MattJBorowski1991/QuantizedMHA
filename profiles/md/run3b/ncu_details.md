@@ -1,6 +1,6 @@
-# Detailed Analysis of fa_tc_v1 in Nsight Compute
+# Nsight Compute - Detailed Analysis
 
-See code here: ![fa_tc_v1.cu](../../../mha_kernels/fa_tc_v1.cu)
+Kernels profiled: [fa_tc_v1.cu](../../../mha_kernels/fa_tc_v1.cu).
 
 ## Main Bottlenecks Detected 
 

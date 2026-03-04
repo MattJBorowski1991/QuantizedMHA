@@ -1,4 +1,6 @@
-# NCU Performance Comparison: fa vs fa_tc_v1
+# NCU High-Level Performance Comparison
+
+Kernels profiled: [fa.cu](../../../mha_kernels/fa.cu) and [fa_tc_v1.cu](../../../mha_kernels/fa_tc_v1.cu).
 
 ## GPU Speed Of Light Throughput
 

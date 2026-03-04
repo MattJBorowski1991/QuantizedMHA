@@ -1,4 +1,6 @@
-# Nsight Compute Profiling Comparison (run2)
+# NCU High-Level Performance Comparison
+
+Kernels profiled: [unfused.cu](../../../mha_kernels/unfused.cu) and [fa.cu](../../../mha_kernels/fa.cu) (post-optimization).
 
 High level performance metrics comparing unfused attention components vs fa (run2). We remove 4x4 from the kernel name as rows handled by warps `Wr` and columns handled by lanes `Lc` are now customizable and set to `Wr = 4` and `Lc = 1`. This is done in preparation for the subsequent implementation of Tensor Cores for which we will have `Wr = 16` or `32`.
 
