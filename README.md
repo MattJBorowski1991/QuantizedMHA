@@ -4,8 +4,7 @@ High-performance CUDA implementations of FlashAttention-2 with various optimizat
 
 ## Performance Highlights
 
-**Flash Attention** = **FA**
-**Tensor Cores** = **TC**
+**Flash Attention** = **FA**, **Tensor Cores** = **TC**.
 
 | FA | TC | Kernel | Time (ms) | Setup | Notes |
 |----|----|--------|-----------|-------|-------|

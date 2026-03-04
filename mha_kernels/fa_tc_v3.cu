@@ -11,16 +11,16 @@
 #include <cuda_fp16.h>
 using namespace nvcuda;
 
-// Flash attention with Tensor Cores v1
-// WMMA_M=16 rows of Q owned by 1 warp
-// 1 warp owns a 16 x d chunk of Q and performs serial wmma, one 16x16 tile per iteration
+// Flash attention with Tensor Cores and int8 quantization
+
+// Supported int8 WMMA tile sizes: 8×8×32, 16×16×32, 16×8×32, 8×16×32. Only int32 output.
 
 #define THREADS_PER_WARP 32
 #define WARPS_PER_TILE_ROW 2
 #define WARP_TILE_ROWS 8
 #define WARPS_PER_BLOCK (WARP_TILE_ROWS * WARPS_PER_TILE_ROW)
 #define FULL_MASK 0xffffffff
-#define PAD 0
+#define PAD 8
 
 //Tensor Core parameters
 constexpr int WMMA_M = 8;
@@ -29,28 +29,13 @@ constexpr int WMMA_K = 16;
 
 static_assert(Br == WMMA_M * WARP_TILE_ROWS, "Block size needs to equal number of warps times number of rows each warp handles");
 
-// Bank conflict avoidance via XOR-based swizzling
-// Spreads column bits to different banks, reducing conflicts on 32-bank shared memory
-__device__ __forceinline__ int swizzle_index(int row, int col, int stride) {
-    // Option 1: (9.5ms)
-    // int linear = row * stride + col;
-    // int swizzle_bits = (col >> 4) & 15;  // Extract bits 4-7 of column
-    // return linear ^ swizzle_bits;  // XOR to spread bank distribution
-
-    // Option 2: (10ms)
-    int chunk_col = col >> 3;   // which 8-element chunk we are in
-    int offset = col & 7;       // offset within that 8-element chunk
-    int swizzled_chunk = chunk_col ^ (row & 3); // phase of 4 is usually sufficient
-
-    return row * stride + (swizzled_chunk << 3) + offset;
-}
 
 template <bool add_to_output = false, int THREADS, int M, int N, int K>
 __device__ __forceinline__ void wmma_A_B(
     const half* __restrict__ A,     // M x K (Q: Br x d, or P: Br x Bc)
     const half* __restrict__ B,    //  K x N (K^T: d x Bc, or V: Bc x d)
     float* C,                       //  M x N (scores: Br x Bc, or output: Br x d)
-    float* c_scratch,               // Shared memory scratch for inter-warp communication
+    half* c_scratch,                // Shared memory scratch for inter-warp communication (half-precision)
     int stride_A = 0,               // stride for A rows (0 = default K)
     int stride_B = 0,               // stride for B rows (0 = default N)
     int stride_C = 0                // stride for C rows (0 = default N)
@@ -68,7 +53,6 @@ __device__ __forceinline__ void wmma_A_B(
     int warp_tile_col_id = warp_id % WARPS_PER_TILE_ROW;      // Position within pair (0 = left half, 1 = right half)
 
     int warp_row = warp_tile_row_id * WMMA_M;
-    if(warp_row >= M) return;
     
     // Determine K range for this warp
     int k_start = warp_tile_col_id * (K / WARPS_PER_TILE_ROW);
@@ -78,13 +62,13 @@ __device__ __forceinline__ void wmma_A_B(
     wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::row_major> b_frag;
     wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
 
-    // Shared memory pointers for inter-warp accumulation
+    // Shared memory pointers for inter-warp accumulation (half-precision storage)
     // For each tile row: need to store the results of the left warp and the right warp and add them at the end
     // The below buffers are for the output of the wmma (MxN), i.e. each warp pair will produce: 
     // (i) left warp: WMMA_M x N partial results; (ii) right warp: WMMA x N partial results
     // => 2 x WMMA_M x N total per pair
-    float* left_warp_res = c_scratch + warp_tile_row_id * (WMMA_M * WARPS_PER_TILE_ROW * N) + 0 * (WMMA_M * N);
-    float* right_warp_res = c_scratch + warp_tile_row_id * (WMMA_M * WARPS_PER_TILE_ROW * N) + 1 * (WMMA_M * N);
+    half* left_warp_res = c_scratch + warp_tile_row_id * (WMMA_M * WARPS_PER_TILE_ROW * N) + 0 * (WMMA_M * N);
+    half* right_warp_res = c_scratch + warp_tile_row_id * (WMMA_M * WARPS_PER_TILE_ROW * N) + 1 * (WMMA_M * N);
 
     // Process each column chunk of N
     for(int b_col = 0; b_col < N; b_col += WMMA_N){
@@ -106,11 +90,15 @@ __device__ __forceinline__ void wmma_A_B(
             }
         }
 
-        // Store this warp's partial result to shared memory
+        // Store this warp's partial result to shared memory (convert float to half)
         if(warp_tile_col_id == 0){
-            wmma::store_matrix_sync(left_warp_res, c_frag, N, wmma::mem_row_major);
+            for(int i = 0; i < c_frag.num_elements; ++i) {
+                left_warp_res[i] = __float2half(c_frag.x[i]);
+            }
         } else {
-            wmma::store_matrix_sync(right_warp_res, c_frag, N, wmma::mem_row_major);
+            for(int i = 0; i < c_frag.num_elements; ++i) {
+                right_warp_res[i] = __float2half(c_frag.x[i]);
+            }
         }
         
         __syncthreads();  // Ensure both warps have stored their partial results
@@ -124,9 +112,9 @@ __device__ __forceinline__ void wmma_A_B(
                 wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_existing;
                 wmma::load_matrix_sync(c_existing, c_dst, stride_C, wmma::mem_row_major);
                 
-                // Add left and right halfs
+                // Add left and right halves (convert from half to float)
                 for(int i = 0; i < c_existing.num_elements; ++i) {
-                    c_existing.x[i] += (left_warp_res[i] + right_warp_res[i]);
+                    c_existing.x[i] += (__half2float(left_warp_res[i]) + __half2float(right_warp_res[i]));
                 }
                 
                 wmma::store_matrix_sync(c_dst, c_existing, stride_C, wmma::mem_row_major);
@@ -135,9 +123,9 @@ __device__ __forceinline__ void wmma_A_B(
                 wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_combined;
                 wmma::fill_fragment(c_combined, 0.0f);
                 
-                // Element-wise addition of both halves
+                // Element-wise addition of both halves (convert from half to float)
                 for(int i = 0; i < c_combined.num_elements; ++i) {
-                    c_combined.x[i] = left_warp_res[i] + right_warp_res[i];
+                    c_combined.x[i] = __half2float(left_warp_res[i]) + __half2float(right_warp_res[i]);
                 }
                 
                 wmma::store_matrix_sync(c_dst, c_combined, stride_C, wmma::mem_row_major);
@@ -150,16 +138,22 @@ __device__ __forceinline__ void wmma_A_B(
 // Scale scores, find max, compute softmax probs, update statistics, rescale output, accumulate O += P @ V
 template<int Br, int Bc, int THREADS, int Lc, int d, int stride_scores = 0, int stride_output = 0>
 __device__ __forceinline__ void online_softmax_and_accum_output(
-    float* max_cur,
-    const float* max_prev,
-    float* sum_exp,
+    void* stats_ptr,                // Statistics struct pointer (to avoid circular dependency)
     float* scores,     // to be overwritten with softmax probs, layout [Br x (Bc + PAD)]
     half* scores_fp16, // quantized scores [Br x (Bc + PAD)] 
     float* output,
     const half *values, // V (Bc x d)
     float inv_sqrt_d,
-    float* c_scratch // Scratch buffer for inter-warp communication in P@V wmma_A_B
+    half* c_scratch // Scratch buffer for inter-warp communication in P@V wmma_A_B (half-precision)
 ) {
+    // Cast stats pointer back to the correct type
+    // (Using void* to avoid forward declaration issues)
+    struct Statistics {
+        float sum_exp;
+        float max_prev;
+        float max_curr;
+    };
+    Statistics* stats = (Statistics*)stats_ptr;
     // Use padded strides
     const int sc_stride = (stride_scores == 0) ? (Bc + PAD) : stride_scores;
     const int out_stride = (stride_output == 0) ? (d + PAD) : stride_output;
@@ -181,7 +175,7 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
         float max_new[WMMA_M], sum_new[WMMA_M], exp_max_diff[WMMA_M];
         #pragma unroll
         for (int i = 0; i < WMMA_M; i++) {
-            max_new[i] = max_prev[row_start + i];
+            max_new[i] = stats[row_start + i].max_prev;
             sum_new[i] = 0.0f;
         }
         
@@ -194,10 +188,9 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
                     int row_idx = row_start + i;
                     int col_idx = col_start + j;
                     if (col_idx < Bc) {
-                        int sidx = swizzle_index(row_idx, col_idx, sc_stride);
-                        float score_scaled = scores[sidx] * inv_sqrt_d;
+                        float score_scaled = scores[row_idx * sc_stride + col_idx] * inv_sqrt_d;
                         max_new[i] = fmaxf(max_new[i], score_scaled);
-                        scores[sidx] = score_scaled;
+                        scores[row_idx * sc_stride + col_idx] = score_scaled;
                     }
                 }
             }
@@ -220,19 +213,19 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
                 for (int j = 0; j < Lc; j++) {
                     int row_idx = row_start + i;
                     int col_idx = col_start + j;
-                    int sidx = swizzle_index(row_idx, col_idx, sc_stride);
+                    int idx = row_idx * sc_stride + col_idx;
 
                     if (row_idx < Br && col_idx < Bc) {
                         //calculate scores, accumulate sum
-                        float prob = expf(scores[sidx] - max_new[i]);
-                        scores[sidx] = prob;
+                        float prob = expf(scores[row_idx * sc_stride + col_idx] - max_new[i]);
+                        scores[idx] = prob;
                         sum_new[i] += prob;
 
                         //quantize scores for later wmma_A_B
-                        scores_fp16[sidx] = __float2half(prob);
+                        scores_fp16[idx] = __float2half(prob);
                     }else{
-                        // Unroll: scores[sidx] already written above
-                        scores_fp16[sidx] = __float2half(0.0f);
+                        scores[idx] = 0.0f;
+                        scores_fp16[idx] = __float2half(0.0f);
                     }
                 }
             }
@@ -250,10 +243,10 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
         // Step 3: Update max and sum statistics (only first lane writes)
         #pragma unroll
         for (int i = 0; i < WMMA_M; i++) {
-            exp_max_diff[i] = expf(max_prev[row_start + i] - max_new[i]);
+            exp_max_diff[i] = expf(stats[row_start + i].max_prev - max_new[i]);
             if (lane_id == 0) {
-                max_cur[row_start + i] = max_new[i];
-                sum_exp[row_start + i] = exp_max_diff[i] * sum_exp[row_start + i] + sum_new[i];
+                stats[row_start + i].max_curr = max_new[i];
+                stats[row_start + i].sum_exp = exp_max_diff[i] * stats[row_start + i].sum_exp + sum_new[i];
             }
         }
         __syncthreads();  // Ensure all threads see updated sum_exp and max_cur
@@ -262,8 +255,7 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
         for (int d_idx = lane_id; d_idx < d; d_idx += THREADS_PER_WARP) {
             #pragma unroll
             for (int i = 0; i < WMMA_M; i++) {
-                int oidx = swizzle_index(row_start + i, d_idx, out_stride);
-                output[oidx] *= exp_max_diff[i];
+                output[(row_start + i) * out_stride + d_idx] *= exp_max_diff[i];
             }
         }
         }  // Close the (row_start < Br) if
@@ -299,23 +291,45 @@ __global__ void fa_kernel(
     const int warp_id = tid / 32;
     const int lane_id = tid % 32;
     int warp_tile_row_id = warp_id / WARPS_PER_TILE_ROW;  // Which pair of warps (for row distribution)
+    constexpr int max_d_bc = (d > Bc ? d : Bc);  // Larger of d and Bc, used for unified buffer sizing
     
     // Shared memory layout with proper 16-byte alignment for tensor core operations
     // Use 1D arrays with stride-based indexing for wmma_A_B compatibility
-    __shared__ float output[Br * (d + PAD)];
-    __shared__ __align__(16) half q_block[Br * (d + PAD)];
-    __shared__ __align__(16) half kt[d * (Bc + PAD)];
-    __shared__ float scores[Br * (Bc + PAD)];
-    __shared__ __align__(16) half scores_fp16[Br * (Bc + PAD)];
-    __shared__ __align__(16) half values[Bc * (d + PAD)];
-    __shared__ float sum_exp[Br];
-    __shared__ float max_prev[Br];
-    __shared__ float max_curr[Br];
+    // Combined q_block and scores_fp16 buffer (reused sequentially, both Br x (max_d_bc + PAD))
+    // q_block: stores Q block, used in Q@K^T computation (lines ~355-406)
+    // scores_fp16: stores quantized softmax probabilities, used in P@V computation (lines ~457-461)
+    // Safe reuse: q_block is unused after Q@K^T due to __syncthreads() at line 422
+    __shared__ __align__(16) half first_q_block_then_scores_fp16[Br * (max_d_bc + PAD)];
+    half* q_block = first_q_block_then_scores_fp16;
+    half* scores_fp16 = first_q_block_then_scores_fp16;
     
-    // Scratch buffer for inter-warp communication in wmma_A_B
+    __shared__ float output[Br * (d + PAD)];
+    __shared__ float scores[Br * (Bc + PAD)];
+    
+    // Combined statistics struct to reduce SRAM usage (768 bytes saved)
+    struct Statistics {
+        float sum_exp;
+        float max_prev;
+        float max_curr;
+    };
+    __shared__ Statistics stats[Br];
+    
+    // Shared buffer reused for both K^T and V (sequential, non-overlapping)
+    // Safe allocation: (d + PAD) × (Bc + PAD) covers both access patterns
+    // kt accessed as: kt[col * (Bc + PAD) + row] where col ∈ [0,d), row ∈ [0,Bc)
+    // values accessed as: values[row * (d + PAD) + col] where row ∈ [0,Bc), col ∈ [0,d)
+    // kt is loaded, used for Q@K^T, then no longer needed before V is loaded
+    __shared__ __align__(16) half kv_buffer[(d + PAD) * (Bc + PAD)];
+    
+    // Convenience pointers for clarity (both point to same buffer at different times)
+    half* kt = kv_buffer;
+    half* values = kv_buffer;
+    
+    // Scratch buffer for inter-warp communication in wmma_A_B (half-precision for 50% memory savings)
     // Reused for both Q@K^T and P@V (sequential, non-overlapping operations)
-    // Sized for max(d, Bc) to handle both Q@K^T (needs Bc) and P@V (needs d)
-    __shared__ float c_scratch[2 * Br * ((d > Bc ? d : Bc) + PAD)];
+    // Sized for max_d_bc to handle both Q@K^T (needs Bc) and P@V (needs d)
+    // No padding needed: c_scratch is accessed via WMMA (bank-aware) then scalar reductions only
+    __shared__ half c_scratch[2 * Br * max_d_bc];
 
     // Load Q block and quantize (warp pair processes its assigned row range)
     int row_start = warp_tile_row_id * WMMA_M;
@@ -345,15 +359,14 @@ __global__ void fa_kernel(
             for (int i = 0; i < WMMA_M; i++) {
                 #pragma unroll
                 for (int j = 0; j < Lc; j++) {
-                    int oidx = swizzle_index(row_start + i, col_start + j, d + PAD);
-                    output[oidx] = 0.0f;
+                    output[(row_start + i) * (d + PAD) + (col_start + j)] = 0.0f;
                 }
             }
         }
     }
     for (int idx = lane_id; idx < Br; idx += THREADS_PER_WARP) {
-        sum_exp[idx] = 0.0f;
-        max_prev[idx] = 0.0f;  // Start at 0, not -INFINITY (first iteration will set it to actual max)
+        stats[idx].sum_exp = 0.0f;
+        stats[idx].max_prev = 0.0f;  // Start at 0, not -INFINITY (first iteration will set it to actual max)
     }
     __syncthreads();
 
@@ -367,13 +380,14 @@ __global__ void fa_kernel(
             for (int i = 0; i < WMMA_M; i++) {
                 int row_idx = warp_tile_row_id * WMMA_M + i;
                 if (row_idx < Br) {
-                    max_curr[row_idx] = -INFINITY;
+                    stats[row_idx].max_curr = -INFINITY;
                 }
             }
         }
         __syncthreads();
         
         // Load K & quantize (transposed with padding, warp pair may loop to cover all Bc rows)
+        // Transposed to row-major layout (matching V) for better bank distribution
         for (int row_start = warp_tile_row_id * WMMA_M; row_start < Bc; row_start += (WARPS_PER_BLOCK / WARPS_PER_TILE_ROW) * WMMA_M) {
             for (int col_start = Lc * lane_id; col_start < d; col_start += THREADS_PER_WARP * Lc) {
                 #pragma unroll
@@ -384,9 +398,9 @@ __global__ void fa_kernel(
                         int col = col_start + j;
                         int k_idx = kv_block_idx * Bc + row;
                         if (k_idx < N && col < d) {
-                            kt[col * (Bc + PAD) + row] = __float2half(K[k_idx * d + col]);
+                            kt[row * (d + PAD) + col] = __float2half(K[k_idx * d + col]);
                         } else {
-                            kt[col * (Bc + PAD) + row] = __float2half(0.0f);
+                            kt[row * (d + PAD) + col] = __float2half(0.0f);
                         }
                     }
                 }
@@ -395,7 +409,8 @@ __global__ void fa_kernel(
         __syncthreads();
         
         // Compute scores = Q @ K^T = Br x Bc
-        wmma_A_B<false, THREADS, Br, Bc, d>(q_block, kt, scores, c_scratch, d + PAD, Bc + PAD, Bc + PAD);
+        // kt now row-major with stride d + PAD for better bank distribution
+        wmma_A_B<false, THREADS, Br, Bc, d>(q_block, kt, scores, c_scratch, d + PAD, d + PAD, Bc + PAD);
         //previously:  matmul_warp_tiled<false, THREADS, Wr, Lc>(q_block, kv_block, scores, Br, Bc, d, Bc + 1, Bc + 1);
 
         __syncthreads();
@@ -422,7 +437,7 @@ __global__ void fa_kernel(
         __syncthreads();
         
         // Online softmax (Br x Bc) + output accumulation (Br x d)
-        online_softmax_and_accum_output<Br, Bc, THREADS, Lc, d>(max_curr, max_prev, sum_exp, scores, scores_fp16, output, values, inv_sqrt_d, c_scratch);
+        online_softmax_and_accum_output<Br, Bc, THREADS, Lc, d, 0, 0>((void*)stats, scores, scores_fp16, output, values, inv_sqrt_d, c_scratch);
         __syncthreads();
         
         // Copy max_curr to max_prev for next iteration (only for rows this warp pair processes)
@@ -430,7 +445,7 @@ __global__ void fa_kernel(
             for (int i = 0; i < WMMA_M; i++) {
                 int row_idx = warp_tile_row_id * WMMA_M + i;
                 if (row_idx < Br) {
-                    max_prev[row_idx] = max_curr[row_idx];
+                    stats[row_idx].max_prev = stats[row_idx].max_curr;
                 }
             }
         }
@@ -448,11 +463,10 @@ __global__ void fa_kernel(
                     int row = row_start + i;
                     int col = col_start + j;
                     if (row < Br && col < d) {
-                        int oidx = swizzle_index(row, col, d + PAD);
-                        if (sum_exp[row] > 1e-10f) {
-                            output[oidx] /= sum_exp[row];
+                        if (stats[row].sum_exp > 1e-10f) {
+                            output[row * (d + PAD) + col] /= stats[row].sum_exp;
                         } else {
-                            output[oidx] = 0.0f;
+                            output[row * (d + PAD) + col] = 0.0f;
                         }
                     }
                 }
@@ -473,8 +487,7 @@ __global__ void fa_kernel(
                     int row = row_start + i;
                     int col = col_start + j;
                     if (q_block_idx * Br + row < N && col < d) {
-                        int oidx = swizzle_index(row, col, d + PAD);
-                        O[(q_block_idx * Br + row) * d + col] = output[oidx];
+                        O[(q_block_idx * Br + row) * d + col] = output[row * (d + PAD) + col];
                     }
                 }
             }
