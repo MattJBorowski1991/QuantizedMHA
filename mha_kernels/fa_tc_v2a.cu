@@ -53,7 +53,6 @@ __device__ __forceinline__ void wmma_A_B(
     int warp_tile_col_id = warp_id % WARPS_PER_TILE_ROW;      // Position within pair (0 = left half, 1 = right half)
 
     int warp_row = warp_tile_row_id * WMMA_M;
-    if(warp_row >= M) return;
     
     // Determine K range for this warp
     int k_start = warp_tile_col_id * (K / WARPS_PER_TILE_ROW);

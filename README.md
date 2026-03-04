@@ -7,13 +7,15 @@ High-performance CUDA implementations of FlashAttention-2 with various optimizat
 **Flash Attention** = **FA**
 **Tensor Cores** = **TC**
 
-- **Unfused (baseline)**: 6.5 + 2.2 + 5.7 = 14.4 ms total (3 kernels: Q@K^T, softmax, P@V)
-- **FA**: 8.33 ms (1 fused kernel, occupancy-limited at 37%)
-- **FA with TC v1a**: 5.77 ms (1 warp owns 16xd of Q)
-- **FA with TC v1b**: 6.00 ms (1 warp owns 8xd of Q)
-- **FA with TC v2**: 8.29 ms (2 warps own 8xd of Q)
-- **FA with TC v2a**: 6.25 ms (2 warps own 8xd of Q + padding)
-- **FA with TC v2b**: 9.60 ms (2 warps own 8xd of Q + swizzling)
+| FA | TC | Version | Kernel | Time (ms) | Notes |
+|----|----|---------| --------|-----------|-------|
+| No | No | unfused | [unfused](mha_kernels/unfused.cu) | 14.4 | 3 kernels: Q@K^T (6.5), softmax (2.2), P@V (5.7) |
+| Yes | No | fa | [fa](mha_kernels/fa.cu) | 8.33 | 1 fused kernel, occupancy-limited at 37% |
+| Yes | Yes | v1a | [fa_tc_v1a](mha_kernels/fa_tc_v1a.cu) | 5.77 | 1 warp owns 16×d of Q |
+| Yes | Yes | v1b | [fa_tc_v1b](mha_kernels/fa_tc_v1b.cu) | 6.00 | 1 warp owns 8×d of Q |
+| Yes | Yes | v2 | [fa_tc_v2](mha_kernels/fa_tc_v2.cu) | 8.29 | 2 warps own 8×d of Q |
+| Yes | Yes | v2a | [fa_tc_v2a](mha_kernels/fa_tc_v2a.cu) | 6.25 | 2 warps own 8×d of Q + padding optimizations |
+| Yes | Yes | v2b | [fa_tc_v2b](mha_kernels/fa_tc_v2b.cu) | 9.60 | 2 warps own 8×d of Q + swizzling (slower) |
 
 For detailed profiling analysis, see [Profiling Results](#profiling-results) below.
 
