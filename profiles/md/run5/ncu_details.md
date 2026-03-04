@@ -18,7 +18,7 @@ Also experimented with various swizzling strategies, which did not yield perform
 - **fa_tc_v2:**  [fa_tc_v2.cu](../../../mha_kernels/fa_tc_v2.cu), PAD = 0
 - **fa_tc_v2a:** [fa_tc_v2a.cu](../../../mha_kernels/fa_tc_v2a.cu), PAD = 8
 
-Both kernels use TC WMMA tile size `8×32×16` with `8 × 2 = 16` warps working independently over the `Br × d = 64 × 32` chunk of Q. The `d` dimension is split in two halves, distributed one per warp.
+Both kernels use TC WMMA tile size `8×32×16` with `8 × 2 = 16` warps working independently over the `Br × d = 64 × 32` chunk of Q. The `d` dimension is split in two halves, distributed one per warp tile row.
 
 ### Result
 
