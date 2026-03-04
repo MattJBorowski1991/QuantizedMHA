@@ -25,7 +25,7 @@ Increase warp occupancy in the Br-dimension by using 8×32×16 WMMA tile size in
 
 **Code Implementations:**
 - **fa_tc_v1a** (`mha_kernels/fa_tc_v1a.cu`): Single warp owns 8×d of Q, PAD=16 (no SRAM overflow)
-- **fa_tc_v2** (`mha_kernels/fa_tc_v2.cu`): Two warps own 8×d of Q, PAD=0 (causes SRAM overflow when PAD=16)
+- **fa_tc_v2** (`mha_kernels/fa_tc_v2.cu`): Two warps own 8×d of Q, PAD=0 (causes SRAM overflow when PAD=16). Allocated SRAM per block with PAD=0 is c.a. 48 kB with configured SRAM size fo 102.4 kB. With PAD=16 the configured size likely drops down to c.a. 64kB, which results in the overflow.
 
 **Bottleneck Visualization:**  
 ![Bottlenecks](../../images/run4/v1a_pad16_vs_v2_pad0_bottlenecks.png)

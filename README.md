@@ -4,10 +4,16 @@ High-performance CUDA implementations of FlashAttention-2 with various optimizat
 
 ## Performance Highlights
 
+**Flash Attention** = **FA**
+**Tensor Cores** = **TC**
+
 - **Unfused (baseline)**: 6.5 + 2.2 + 5.7 = 14.4 ms total (3 kernels: Q@K^T, softmax, P@V)
-- **Flash Attention**: 8.33 ms (1 fused kernel, currently occupancy-limited at 37%)
-- **Flash Attention with Tensor Cores**: 5.75 ms (1 fused kernel, even lower occupancy)
-- **High occupancy unfused**: 87–100% SM utilization with 65,536 blocks
+- **FA**: 8.33 ms (1 fused kernel, occupancy-limited at 37%)
+- **FA with TC v1a**: 5.77 ms (1 warp owns 16xd of Q)
+- **FA with TC v1b**: 6.00 ms (1 warp owns 8xd of Q)
+- **FA with TC v2**: 8.29 ms (2 warps own 8xd of Q)
+- **FA with TC v2a**: 6.25 ms (2 warps own 8xd of Q + padding)
+- **FA with TC v2b**: 9.60 ms (2 warps own 8xd of Q + swizzling)
 
 For detailed profiling analysis, see [Profiling Results](#profiling-results) below.
 

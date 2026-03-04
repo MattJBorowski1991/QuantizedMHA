@@ -11,18 +11,18 @@
 #include <cuda_fp16.h>
 using namespace nvcuda;
 
-// Flash attention with Tensor Cores v1
+// Flash attention with Tensor Cores v1a
 // WMMA_M=16 rows of Q owned by 1 warp
-// 1 warp owns a 16 x d chunk of Q and performs serial wmma, one 16x16 tile per iteration
+// 1 warp owns a 8 x d chunk of Q and performs serial wmma, one 8x32x16 tile per iteration
 
 #define THREADS_PER_WARP 32
-#define WARPS_PER_BLOCK 4
+#define WARPS_PER_BLOCK 8
 #define FULL_MASK 0xffffffff
-#define PAD 16
+#define PAD 0
 
 //Tensor Core parameters
-constexpr int WMMA_M = 16;
-constexpr int WMMA_N = 16;
+constexpr int WMMA_M = 8;
+constexpr int WMMA_N = 32;
 constexpr int WMMA_K = 16;
 
 static_assert(Br == WMMA_M * WARPS_PER_BLOCK, "Block size needs to equal number of warps times number of rows each warp handles");
