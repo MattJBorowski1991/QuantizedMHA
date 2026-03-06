@@ -151,13 +151,3 @@ compute-sanitizer ./bin/profile_fa_tc
 compute-sanitizer --tool memcheck ./bin/profile_fa_tc_v1 --warmup=1 --runs=1 2>&1 | head -150
 
 ```
-
-## Notes
-
-#### Quantization Workflow
-
-0. Quantize fp16→int8 preprocessing: convert float inputs to int8 using scale/zero before main kernel
-1. Dequantize on-the-fly in Q@K^T
-2. Handle float x int8 for P@V matmul
-3. Update SRAM layout - less mem needed for int8
-4. Unchanged: softmax
