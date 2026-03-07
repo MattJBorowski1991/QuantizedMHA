@@ -72,22 +72,65 @@ where:
 
 ---
 
-## II. MHA Flash Attention with Int8 Quantization
+## II. MHA Flash Attention with Int8 Quantization (High-Level Overview)
 
-### Workflow
-1. **Input:** Q, K, V in fp32
-2. **Quantize each:** Q→int8, K→int8, V→int8 (separate `scale` and `zp` for each)
-3. **Compute scores:** `scores_int32 = Q_int8 @ K_int8^T` (WMMA)
-4. **Dequantize scores:** `scores_fp32 = scores_int32 * scale_Q * scale_K`
-5. **Apply scaling:** `scaled_scores = scores_fp32 / sqrt(d)` (float operation)
-6. **Softmax:** `weights_fp32 = softmax(scaled_scores)` (float)
-7. **Quantize weights:** `P_int8 = quantize(weights_fp32)` (separate `scale_P`, `zp_P`)
-8. **Compute output:** `output_int32 = P_int8 @ V_int8` (WMMA)
-9. **Dequantize output:** `output_fp32 = output_int32 * scale_P * scale_V`
+### General Quantization Strategy
+
+**Goal:** Reduce compute/memory by quantizing matrix multiplications while maintaining numerical stability.
+
+**Key Operations:**
+1. **Input quantization:** Q, K, V → int8 (per-block symmetric with separate scales)
+2. **Matmul:** int8 @ int8 → int32 (via WMMA hardware)
+3. **Dequantization:** int32 → fp32 with product of input scales
+4. **Softmax:** Computed in fp32 (requires floating-point exponentials and comparisons)
+5. **Softmax quantization:** Softmax probabilities (weights) → int8 (before matmul with V)
+6. **Output matmul & accumulation:** int8 @ int8 → int32, dequantize to fp32, accumulate
+
+**Quantization Points in Pipeline:**
+- `Q @` `K^T`: `Q_int8 @ K_int8^T → scores_int32 → dequant to fp32`
+- Softmax: `fp32 exp/max/sum operations` (no quantization)
+- `P @ V`: `P_int8 @ V_int8 → output_partial_int32 → dequant to fp32 → accumulate`
+
+### Key Design Decisions
+✅ Use **symmetric quantization** for all matmuls (centered around 0, no zero-point)  
+✅ Keep softmax in **float32** (no quantization)  
+✅ Separate `scale` for each block: Q, K, V, P (different ranges per block)  
+✅ Dequantize immediately after each matmul requiring the result in fp32
 
 ---
 
-### Key Design Decisions
-✅ Use **symmetric quantization** for all matmuls (Q@K, P@V)  
-✅ Keep softmax in **float32** (no quantization needed)  
-✅ Separate `scale/zp` for Q, K, V, P (different ranges)
+---
+
+## III. Online Flash Attention with Int8 Quantization (Detailed Algorithm)
+
+This section describes the actual implementation: block-wise processing with online softmax statistics tracking.
+
+### Algorithm Structure (per query block)
+
+**Initialization (before kv_block loop):**
+- Load & quantize Q block (Br × d) → int8
+- Initialize `output = 0` (Br × d, **fp32 accumulator**)
+- Initialize `stats`: sum_exp=0, max_prev=0 (dummy for first iteration) per row
+
+**Per kv_block_idx iteration (process one K,V block):**
+1. Load K & V blocks (Bc × d each), quantize → int8
+2. Compute `scores_int32 = Q_int8 @ K_int8^T` (Br × Bc)
+3. **Online Softmax:**
+   - Dequantize scores → fp32: `scores_fp32 = scores_int32 * scale_Q * scale_K`
+   - Find max per row, scale by `1/sqrt(d)`
+   - Compute `exp(score - max)`, accumulate sum across warp
+   - Update stats: `sum_exp = exp(max_old - max_new) * sum_exp_old + sum_new` (handles numerical stability across blocks)
+   - Rescale previous output by `exp(max_old - max_new)` (maintains consistency with new max)
+4. **Quantize softmax:** `P_int8 = quantize(scores_fp32)` (separate `scale_P`)
+5. **Accumulate output:**
+   - Compute `partial_int32 = P_int8 @ V_int8` (Br × d)
+   - **Immediately dequantize to fp32:** `partial_fp32 = partial_int32 * scale_P * scale_V`
+   - Add to output: `output += partial_fp32`
+6. Copy `max_curr → max_prev` for next iteration
+
+**Epilogue (after kv_block loop):**
+- Normalize: `output_final = output / sum_exp` (both already fp32)
+- Store to global memory
+
+### Key Insight
+Each P_i @ V_i iteration has **distinct scales** (scale_P_i and scale_V_i), so dequantization must happen immediately after each matmul. Output is accumulated in fp32 to avoid mixing heterogeneous scaled int32 values.

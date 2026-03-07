@@ -32,15 +32,4 @@ constexpr int d = d_model / h;      // Dimensions per head
 static_assert(d % (Lc * 32) == 0, "d must be a multiple of (Lc * 32)");
 static_assert(Bc % (Lc * 32) == 0, "Bc must be a multiple of (Lc * 32)");
 
-// INT8 Quantization parameters
-// Scales set to preserve dynamic range: scale = max_range / 127
-// For constant=1.0 inputs: int8 = round(1.0/scale), dequant = int8*scale
-// Large scales preserve magnitude: 1.0 → int8≈127 → dequant≈1.0
-constexpr float Q_SCALE = 1.0f;     // Q quantization scale (increase to preserve range)
-constexpr float K_SCALE = 1.0f;     // K quantization scale
-constexpr float V_SCALE = 1.0f;     // V quantization scale
-constexpr float Q_ZERO = 0.0f;      // Q zero point
-constexpr float K_ZERO = 0.0f;      // K zero point
-constexpr float V_ZERO = 0.0f;      // V zero point
-
 #endif // CONFIG_H
