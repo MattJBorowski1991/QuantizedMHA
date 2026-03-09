@@ -1,6 +1,6 @@
 # Nsight Compute - Detailed Analysis
 
-Kernels profiled: [fa_tc_v1.cu](../../../mha_kernels/fa_tc_v1.cu).
+Kernels profiled: [fa_tc_v1a.cu](../../../mha_kernels/fa_tc_v1a.cu).
 
 ## Main Bottlenecks Detected 
 

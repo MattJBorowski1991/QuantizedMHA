@@ -1,6 +1,6 @@
 # Nsight Compute - Detailed Analysis
 
-Kernels profiled: [fa_tc_v1a.cu](../../../mha_kernels/fa_tc_v1a.cu) and [fa_tc_v2.cu](../../../mha_kernels/fa_tc_v2.cu).
+Kernels profiled: [fa_tc_v1b.cu](../../../mha_kernels/fa_tc_v1b.cu) and [fa_tc_v2.cu](../../../mha_kernels/fa_tc_v2.cu).
 
 ## Approach Overview
 
@@ -8,7 +8,7 @@ Kernels profiled: [fa_tc_v1a.cu](../../../mha_kernels/fa_tc_v1a.cu) and [fa_tc_v
 Increase warp occupancy in the Br-dimension by using 8×32×16 WMMA tile size instead of 16×16×16. In this run we keep Br=64.
 
 **Kernel Variants:**
-- **fa_tc_v1a:** Single-warp owns 8xd of Q (no SRAM overflow with PAD=16)
+- **fa_tc_v1b:** Single-warp owns 8xd of Q (no SRAM overflow with PAD=16)
 - **fa_tc_v2:** Distribute warp work across d-dimension to two warps (SRAM overflow with PAD=16)
 
 **Warp Work Distribution Strategy:**
@@ -26,11 +26,11 @@ Increase warp occupancy in the Br-dimension by using 8×32×16 WMMA tile size in
 ## Implementation Details
 
 **Code Implementations:**
-- **fa_tc_v1a** (`mha_kernels/fa_tc_v1a.cu`): Single warp owns 8×d of Q, PAD=16 (no SRAM overflow)
+- **fa_tc_v1b** (`mha_kernels/fa_tc_v1b.cu`): Single warp owns 8×d of Q, PAD=16 (no SRAM overflow)
 - **fa_tc_v2** (`mha_kernels/fa_tc_v2.cu`): Two warps own 8×d of Q, PAD=0 (causes SRAM overflow when PAD=16). Allocated SRAM per block with PAD=0 is c.a. 48 kB with configured SRAM size fo 102.4 kB. With PAD=16 the configured size likely drops down to c.a. 64kB, which results in the overflow.
 
 **Bottleneck Visualization:**  
-![Bottlenecks](../../images/run4/v1a_pad16_vs_v2_pad0_bottlenecks.png)
+![Bottlenecks](../../images/run4/v1b_pad16_vs_v2_pad0_bottlenecks.png)
 
 ### Additional Validation Run
 
@@ -42,30 +42,30 @@ An extra run with **Br=32** (instead of 64), **4×2 = 8 warps** per block, **PAD
 
 - **Compute vs Memory Throughput:**  
   Compute throughput decreased — bank conflicts negate the benefit of doubling warps. Memory throughput as a percentage of peak rose slightly, but absolute memory bandwidth (MB/s) fell ~30%.  
-  ![Compute and Memory Throughput](../../images/run4/v1a_pad16_vs_v2_pad0_thoughput.png)
+  ![Compute and Memory Throughput](../../images/run4/v1b_pad16_vs_v2_pad0_thoughput.png)
 
 - **Bank Conflicts:**  
   ≈3‑way bank conflicts on both shared loads and stores, accounting for ~54–67% of affected wavefronts. These conflicts drive serialization and throughput loss.  
-  ![Bank Conflicts](../../images/run4/v1a_pad16_vs_v2_pad0_bank_conflicts.png)
+  ![Bank Conflicts](../../images/run4/v1b_pad16_vs_v2_pad0_bank_conflicts.png)
 
 - **Scheduler Statistics:**  
   Active/theoretical warps roughly doubled as expected, but Eligible warps rose only ~35% and issued work decreased — indicating stalls or resource contention reducing effective issue rate.  
-  ![Scheduler Statistics](../../images/run4/v1a_pad16_vs_v2_pad0_scheduler_stats.png)
+  ![Scheduler Statistics](../../images/run4/v1b_pad16_vs_v2_pad0_scheduler_stats.png)
 
 - **Warp State Statistics:**  
   Warp cycles per issued instruction increased >120%, driven by Stall Barrier and Stall MIO Throttle spikes. This explains much of the lost throughput.  
-  ![Warp State Statistics](../../images/run4/v1a_pad16_vs_v2_pad0_warp_state_stats.png)
+  ![Warp State Statistics](../../images/run4/v1b_pad16_vs_v2_pad0_warp_state_stats.png)
 
 - **Occupancy:**  
   Occupancy increased ~100% when splitting work across the d‑axis. 
-  ![Occupancy 1](../../images/run4/v1a_pad16_vs_v2_pad0_occupancy_1.png) 
+  ![Occupancy 1](../../images/run4/v1b_pad16_vs_v2_pad0_occupancy_1.png) 
   
   Only ~5 KB of additional SRAM remains usable before occupancy drops by ~50% (SRAM pressure is tight).  
-  ![Occupancy 2](../../images/run4/v1a_pad16_vs_v2_pad0_occupancy_2.png)
+  ![Occupancy 2](../../images/run4/v1b_pad16_vs_v2_pad0_occupancy_2.png)
 
 - **Source Counters:**  
   Large number of branch/source instructions attributable to uncoalesced shared accesses that map multiple threads to the same shared‑memory banks (causing bank conflicts and serialization). See source counter heatmap and code links for hotspots.  
-  ![Source Counters](../../images/run4/v1a_pad16_vs_v2_pad0_source_counters.png)
+  ![Source Counters](../../images/run4/v1b_pad16_vs_v2_pad0_source_counters.png)
 
 ## Notes
 
