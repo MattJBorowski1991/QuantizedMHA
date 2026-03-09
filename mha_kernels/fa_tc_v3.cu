@@ -23,7 +23,7 @@ using namespace nvcuda;
 #define WARPS_PER_BLOCK (WARP_TILE_ROWS * WARPS_PER_TILE_ROW)
 #define THREADS (WARPS_PER_BLOCK * THREADS_PER_WARP)
 #define FULL_MASK 0xffffffff
-#define PAD 16
+#define PAD 0
 
 //Tensor Core parameters
 constexpr int WMMA_M = 8;
@@ -160,7 +160,7 @@ static __device__ __forceinline__ void int32sram_to_fp32(
 
 // assume A, B, C are in SRAM
 template <bool add_to_output = false, int M, int N, int K>
-static __device__ __forceinline__ void wmma_A_B(
+static __device__ __noinline__ void wmma_A_B(
     const int8_t* __restrict__ A,     // M x K (Q: Br x d, or P: Br x Bc)
     const int8_t* __restrict__ B,    //  K x N (K^T: d x Bc, or V: Bc x d)
     int* C,                       //  M x N (scores: Br x Bc, or output: Br x d)
@@ -482,10 +482,12 @@ __global__ void fa_kernel(
     __shared__ union{
         float scores_fp32[Br * (Bc + PAD)];
         int scores_int32[Br * (Bc + PAD)];
+        int temp_output_int32[Br * (d + PAD)];
     } scores;
 
     float* scores_fp32 = scores.scores_fp32;
     int* scores_int32 = scores.scores_int32;
+    int* temp_output_int32 = scores.temp_output_int32;
     
     // Statistics arrays (separate instead of struct to simplify passing to helper functions)
     __shared__ float sum_exp[Br];
@@ -512,7 +514,6 @@ __global__ void fa_kernel(
     float *block_scales_Kt = block_scales + BLOCKS;
     float *block_scales_V = block_scales + 2 * BLOCKS; 
     float *block_scales_P = block_scales + 3 * BLOCKS;
-    __shared__ int temp_output_int32[Br * (d + PAD)];
 
     // Load Q block and quantize (warp pair processes its assigned row range)
     int row_start = warp_tile_row_id * WMMA_M;
@@ -622,6 +623,9 @@ void launch_fa(const float *Q, const float *K, const float *V, float *O, int N, 
     float* d_block_scales = nullptr;
     cudaMalloc(&d_block_scales, 4 * BLOCKS * sizeof(float)); //One for each: Q, K, P, V
     
+    int sram_carveout = 100; //set shared memory capacity to 100% of maximum
+    cudaFuncSetAttribute((void*)fa_kernel<Br, Bc, d, Lc>, cudaFuncAttributePreferredSharedMemoryCarveout, sram_carveout);
+
     // Static __shared__ arrays are automatically allocated by compiler, no need to specify size
     fa_kernel<Br, Bc, d, Lc><<<BLOCKS, THREADS, 0, stream>>>(Q, K, V, d_block_scales, O, N, BLOCKS, inv_sqrt_d);
 

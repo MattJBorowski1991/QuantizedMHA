@@ -139,6 +139,16 @@ Each P_i @ V_i iteration has **distinct scales** (scale_P_i and scale_V_i), so d
 _______________
 
 
-Needed to do some aggressive SRAM optimizations in order to accomodate the extra Sram necessary for int8 & int32 buffers, including a shared union (=aliasing) for scores_fp32, scores_int32 and temp_output_int32, q_block, scores_int8 (used for accumulation during online softmax). Code becomes less readable and more difficult to debug.
+Needed to do some aggressive SRAM optimizations in order to accomodate the extra Sram necessary for int8 & int32 buffers, including a shared union (=aliasing) for scores_fp32, scores_int32 and temp_output_int32, q_block, scores_int8 (used for accumulation during online softmax). Code becomes less readable and more difficult to debug. CAVEAT: better don't touch wmma-related inputs/outputs not to ruin 16-byte allighmnet
 
 The largest drag on SRAM remaing the c_scratch buffer in WMMA so we can accumulate the results of the left warp and the right warp (per tile row).
+
+Interestingly the SRAM config size (set by CUDA at runtime) for Br=32 is 102.4kB (with xx static SRAM allocation) and drops to 65.54 kB for Br=64 (with 45.31kB static SRAM allocation)! This causes only one block (instead of 3) per SM to fit and latency taking a 40% hit from 10ms to 14ms for the latter. The comparison of the two is below. 
+
+At the setting of Br=32 the limting factor on the block limit (max 3) were there registers:
+- replacing __forceinline__ with __noinline__ reduced regs per thread by ~6-7% but at the same time it hit compute&mem throughbput by 4-5% => duration hit by 10%.
+- moving the stats arrays (max_new, sum_new, exp_max_diff) in online_softmax_and_accum_output from per-thread to shared memory did not yield a positive outcome
+- removing pragma unroll neither yielded a positive outcome
+- with `-maxrregcount=X` the compiler is more aggressive than just capping the regs per thread to X. e.g. for -maxrregcount=68 the number of regs per thread dropped from 69 to 60.
+- change of strategy: from trying to fit as many as possible warps per block, try instead as an alternative to fit more smaller blocks per SM => still good impact on occupancy
+- putting temp_output_int32 to the shared union caused the shared mem config size to decrease from 102.4 to 65.54 kB -->> cudaFuncSetAttribute solved it and kept the config at 102.4kB!!

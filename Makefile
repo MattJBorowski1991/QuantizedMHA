@@ -3,6 +3,16 @@ NVCC = nvcc
 # Optimization and source-mapping for Nsight Compute; do NOT use -G here
 NVCC_FLAGS = -O3 -lineinfo -Xcompiler -Wall
 
+# Optional max register count limit
+# Usage: make MAXRREGCOUNT=64
+# If not specified, no register limit is applied (default behavior)
+MAXRREGCOUNT ?=
+ifeq ($(MAXRREGCOUNT),)
+  NVCC_REGCOUNT =
+else
+  NVCC_REGCOUNT = -maxrregcount=$(MAXRREGCOUNT)
+endif
+
 # Default target architecture (compute for PTX, sm for native SASS).
 # Override by calling, e.g. `make NVCC_ARCH=86`
 NVCC_ARCH ?= 86
@@ -47,7 +57,7 @@ all: $(TARGET)
 
 $(TARGET): $(SRCS)
 	@mkdir -p $(BIN_DIR)
-	$(NVCC) $(NVCC_FLAGS) $(NVCC_GENCODE) $(INCLUDE_FLAGS) $(SRCS) -o $(TARGET)
+	$(NVCC) $(NVCC_FLAGS) $(NVCC_GENCODE) $(INCLUDE_FLAGS) $(NVCC_REGCOUNT) $(SRCS) -o $(TARGET)
 
 clean:
 	rm -rf $(BIN_DIR)
