@@ -8,9 +8,6 @@ bin/
 profiles/ncu/
 profiles/csv/
 
-# Cache files
-.cache/
-
 # IDE
 .vscode/
 *.swp

@@ -13,16 +13,17 @@
 using namespace nvcuda;
 
 // Flash attention with Tensor Cores and int8 quantization
-
 // Supported int8 WMMA tile sizes: 8×8×32, 16×16×32, 16×8×32, 8×16×32. Only int32 output.
+// 2 warps own 8xd of Q
+// Extreme SRAM pressure with PAD=16 and extra buffers for int8 => had to decrease Br to 32 (from 64)
 
 #define THREADS_PER_WARP 32
 #define WARPS_PER_TILE_ROW 2
-#define WARP_TILE_ROWS 8
+#define WARP_TILE_ROWS 4
 #define WARPS_PER_BLOCK (WARP_TILE_ROWS * WARPS_PER_TILE_ROW)
 #define THREADS (WARPS_PER_BLOCK * THREADS_PER_WARP)
 #define FULL_MASK 0xffffffff
-#define PAD 8
+#define PAD 16
 
 //Tensor Core parameters
 constexpr int WMMA_M = 8;
@@ -273,15 +274,16 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     int* scores_int32,     // Q@K^T, layout [Br x (Bc + PAD)]
     int8_t* scores_int8, // quantized scores [Br x (Bc + PAD)]
     float* scores_fp32, // for the softmax calculations
-    float old_block_scales_Q,              // for dequantization of scores: int32->fp32
-    float old_block_scales_Kt,             // as above
+    const float* __restrict__ block_scales_Q,              // for dequantization of scores: int32->fp32
+    const float* __restrict__ block_scales_Kt,             // as above
     float* __restrict__ block_scales_P,          // for subsequent quantization of dequantized scores: fp32->int8 to get P_next
     int* temp_output_int32, //accumulation of wmma for P@V
     float* output,    // P@V
     const int8_t* values, // V (Bc x d)
     const float* scales_V,
     float inv_sqrt_d,
-    int* c_scratch // Scratch buffer for inter-warp communication in P@V wmma_A_B
+    int* c_scratch, // Scratch buffer for inter-warp communication in P@V wmma_A_B
+    int kv_block_idx // KV block index for correct scale indexing
 ) {
     // Use padded strides
     const int sc_stride = (stride_scores == 0) ? (Bc + PAD) : stride_scores;
@@ -290,12 +292,12 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     int tid = threadIdx.x;
     int warp_id = tid / 32;
     int lane_id = tid % 32;
-    int bid = blockIdx.x;
+    int bid = blockIdx.x;  // Q block index
     int warp_tile_row_id = warp_id / WARPS_PER_TILE_ROW;  // Which pair of warps
     int warp_tile_col_id = warp_id % WARPS_PER_TILE_ROW;  // Position within pair (0=left, 1=right)
 
-    //read old_block_scales_Q and old_block_scales_Kt to dequantize
-    int32sram_to_fp32<Br, Bc + PAD, false>(scores_int32, old_block_scales_Q, old_block_scales_Kt, scores_fp32, bid);
+    //read block_scales_Q and block_scales_Kt to dequantize
+    int32sram_to_fp32<Br, Bc + PAD, false>(scores_int32, const_cast<float*>(block_scales_Q + bid), const_cast<float*>(block_scales_Kt + kv_block_idx), scores_fp32, 0);
 
     // Only LEFT warp (warp_tile_col_id==0) executes online_softmax
     // RIGHT warp (warp_tile_col_id==1) will participate in wmma_A_B P@V only
@@ -394,7 +396,7 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     __syncthreads();
 
     //write to block_scales_P when quantizing
-    fp32_to_int8sram<Br, Bc + PAD, false, false>(scores_fp32, block_scales_P, scores_int8, bid);
+    fp32_to_int8sram<Br, Bc + PAD, false, false>(scores_fp32, block_scales_P, scores_int8, kv_block_idx);
     
     // Step 5: Accumulate O += (softmax probs) @ V (both warps in pair collaborate)
     // scores_int8: Br x Bc with stride Bc+PAD
@@ -402,7 +404,7 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     // output: Br x d with stride d+PAD
     wmma_A_B<false, Br, d, Bc>(scores_int8, values, temp_output_int32, c_scratch, Bc + PAD, d + PAD, d + PAD);
     for(int i = tid; i < Br * (d + PAD); i += THREADS){
-        output[i] += (float)temp_output_int32[i] * block_scales_P[bid] * scales_V[bid];
+        output[i] += (float)temp_output_int32[i] * block_scales_P[kv_block_idx] * scales_V[kv_block_idx];
     }
 }
 
@@ -471,12 +473,19 @@ __global__ void fa_kernel(
     // scores_int8: stores quantized softmax probabilities, used in P@V computation (lines ~457-461)
     // Safe reuse: q_block is unused after Q@K^T due to __syncthreads() at line 422
     __shared__ __align__(16) int8_t first_q_block_then_scores_int8[Br * (max_d_bc + PAD)];
+    
     int8_t* q_block = first_q_block_then_scores_int8;
     int8_t* scores_int8 = first_q_block_then_scores_int8;
     
     __shared__ float output[Br * (d + PAD)];
-    __shared__ float scores_fp32[Br * (Bc + PAD)];
-    __shared__ int scores_int32[Br * (Bc + PAD)];
+
+    __shared__ union{
+        float scores_fp32[Br * (Bc + PAD)];
+        int scores_int32[Br * (Bc + PAD)];
+    } scores;
+
+    float* scores_fp32 = scores.scores_fp32;
+    int* scores_int32 = scores.scores_int32;
     
     // Statistics arrays (separate instead of struct to simplify passing to helper functions)
     __shared__ float sum_exp[Br];
@@ -544,7 +553,7 @@ __global__ void fa_kernel(
         
         // Online softmax (Br x Bc) + output accumulation (Br x d)
         online_softmax_and_accum_output<Br, Bc, Lc, d, 0, 0>
-        (sum_exp, max_prev, max_curr, scores_int32, scores_int8, scores_fp32, block_scales_Q[q_block_idx], block_scales_Kt[kv_block_idx], block_scales_P, temp_output_int32, output, values, block_scales_V[kv_block_idx], inv_sqrt_d, c_scratch);
+        (sum_exp, max_prev, max_curr, scores_int32, scores_int8, scores_fp32, block_scales_Q, block_scales_Kt, block_scales_P, temp_output_int32, output, values, block_scales_V, inv_sqrt_d, c_scratch, kv_block_idx);
         __syncthreads();
         
         // Copy max_curr to max_prev for next iteration (only for rows this warp pair processes)

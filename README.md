@@ -16,8 +16,6 @@ High-performance CUDA implementations of FlashAttention-2 with various optimizat
 | Yes | Yes | [fa_tc_v2a](mha_kernels/fa_tc_v2a.cu) | 6.25 | 2 warps own 8×d of Q | Padding added |
 | Yes | Yes | [fa_tc_v2b](mha_kernels/fa_tc_v2b.cu) | 9.60 | 2 warps own 8×d of Q | Swizzling added |
 
-For detailed profiling analysis, see [Profiling Results](#profiling-results) below.
-
 ## Profiling Results
 
 Detailed profiling analysis via Nsight Compute, comparing kernel performance across unfused vs fused attention implementations.

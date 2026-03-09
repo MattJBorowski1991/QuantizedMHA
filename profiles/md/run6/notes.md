@@ -134,3 +134,11 @@ This section describes the actual implementation: block-wise processing with onl
 
 ### Key Insight
 Each P_i @ V_i iteration has **distinct scales** (scale_P_i and scale_V_i), so dequantization must happen immediately after each matmul. Output is accumulated in fp32 to avoid mixing heterogeneous scaled int32 values.
+
+
+_______________
+
+
+Needed to do some aggressive SRAM optimizations in order to accomodate the extra Sram necessary for int8 & int32 buffers, including a shared union (=aliasing) for scores_fp32, scores_int32 and temp_output_int32, q_block, scores_int8 (used for accumulation during online softmax). Code becomes less readable and more difficult to debug.
+
+The largest drag on SRAM remaing the c_scratch buffer in WMMA so we can accumulate the results of the left warp and the right warp (per tile row).

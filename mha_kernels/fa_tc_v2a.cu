@@ -20,7 +20,7 @@ using namespace nvcuda;
 #define WARP_TILE_ROWS 8
 #define WARPS_PER_BLOCK (WARP_TILE_ROWS * WARPS_PER_TILE_ROW)
 #define FULL_MASK 0xffffffff
-#define PAD 8
+#define PAD 16
 
 //Tensor Core parameters
 constexpr int WMMA_M = 8;
