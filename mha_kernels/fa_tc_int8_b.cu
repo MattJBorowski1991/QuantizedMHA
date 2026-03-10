@@ -55,7 +55,7 @@ static __device__ __forceinline__ void fp32_to_int8sram(
     //per-thread min and max calculated on the fly
     float local_min = INFINITY;
     float local_max = -INFINITY;
-    for(int i = tid; i < size; i +=){
+    for(int i = tid; i < size; i += THREADS){
         float v = block_in[i];
         local_min = fminf(local_min, v);
         local_max = fmaxf(local_max, v);
@@ -99,6 +99,7 @@ static __device__ __forceinline__ void fp32_to_int8sram(
         }
 
         if(lane_id == 0){
+            // TODO: fix for blocks with all tiny values i.e. when sc=1e-8f. Now dequantization is not working for such blocks
             float sc = fmaxf(fmaxf(fabs(block_max), fabs(block_min)) / 127.0f, 1e-8f);
             block_scales[bid] = sc;
             inv_sc_shared = 1.0f / sc;
@@ -147,7 +148,7 @@ static __device__ __forceinline__ void int32sram_to_fp32(
     }
     
     for(int i = tid; i < size; i += THREADS){
-        block_out[i] = static_cast<float>(block_in[i]) * block_scales_A[bid] * block_scales_b[bid];
+        block_out[i] = static_cast<float>(block_in[i]) * block_scales_A[bid] * block_scales_B[bid];
     }
 }
 
@@ -247,8 +248,7 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     int q_block_idx = blockIdx.x;
 
     //read block_scales_Q and block_scales_Kt to dequantize
-    int32sram_to_fp32<Br, Bc + PAD, false> int32sram_to_fp32
-    (scores_int32, const_cast<float*>(block_scales_Q + q_block_idx), const_cast<float*>(block_scales_Kt + q_block_idx), scores_fp32, q_block_idx);
+    int32sram_to_fp32<Br, Bc + PAD, false>(scores_int32, const_cast<float*>(block_scales_Q + q_block_idx), const_cast<float*>(block_scales_Kt + q_block_idx), scores_fp32, q_block_idx);
 
     // Process WMMA_M query rows per warp (same as matmul_warp_tiled)
     for (int row_start = WMMA_M * warp_id; row_start < Br; row_start += WARPS_PER_BLOCK * WMMA_M) 
@@ -471,7 +471,7 @@ __global__ void fa_kernel(
         
         // Online softmax (Br x Bc) + output accumulation (Br x d)
         online_softmax_and_accum_output<Br, Bc, Lc, d>
-        (max_cur, max_prev, sum_exp, scores_int32, scores_int8, scores_fp32, block_scales_Q, block_scales_Kt, block_scales_P, temp_output_int32, output, values, block_scales_V, inv_sqrt_d, kv_block_idx)
+        (max_curr, max_prev, sum_exp, scores_int32, scores_int8, scores_fp32, block_scales_Q, block_scales_Kt, block_scales_P, temp_output_int32, output, values, block_scales_V, inv_sqrt_d, kv_block_idx);
         __syncthreads();
         
         // Copy max_curr to max_prev for next iteration (only for rows this warp processes)
