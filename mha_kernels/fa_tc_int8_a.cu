@@ -19,7 +19,7 @@ using namespace nvcuda;
 
 #define THREADS_PER_WARP 32
 #define WARPS_PER_TILE_ROW 2
-#define WARP_TILE_ROWS 4
+#define WARP_TILE_ROWS 8
 #define WARPS_PER_BLOCK (WARP_TILE_ROWS * WARPS_PER_TILE_ROW)
 #define THREADS (WARPS_PER_BLOCK * THREADS_PER_WARP)
 #define FULL_MASK 0xffffffff
@@ -29,7 +29,7 @@ constexpr int WMMA_M = 8;
 constexpr int WMMA_N = 32;
 constexpr int WMMA_K = 16;
 
-static_assert(Br == WMMA_M * WARP_TILE_ROWS, "Block size needs to equal number of warps times number of rows each warp handles");
+static_assert(Br == WMMA_M * WARP_TILE_ROWS, "Block size needs to equal number of warp tile rows times number of rows each warp handles");
 
 // asumme full_prec_in is provided either in DRAM (bool=1) or SRAM (bool=0)
 // int8_out is always in SRAM
@@ -80,7 +80,7 @@ static __device__ __forceinline__ void fp32_to_int8sram(
     __shared__ float warp_mins[WARPS_PER_BLOCK];
 
 
-        if (lane_id == 0) {
+    if (lane_id == 0) {
         warp_maxs[warp_id] = local_max;
         warp_mins[warp_id] = local_min;
     }
@@ -175,7 +175,7 @@ static __device__ __forceinline__ void int32sram_to_fp32(
 
 // assume A, B, C are in SRAM
 template <bool add_to_output = false, int M, int N, int K>
-static __device__ __noinline__ void wmma_A_B(
+static __device__ __noinline__ int wmma_A_B(
     const int8_t* __restrict__ A,     // M x K (Q: Br x d, or P: Br x Bc)
     const int8_t* __restrict__ B,    //  K x N (K^T: d x Bc, or V: Bc x d)
     int* C,                       //  M x N (scores: Br x Bc, or output: Br x d)
@@ -586,7 +586,6 @@ __global__ void fa_kernel(
 
 
     // Epilogue: normalize output (warp pair processes its assigned row range)
-    row_start = warp_tile_row_id * WMMA_M;
     if (row_start < Br) {
         for (int col_start = Lc * lane_id; col_start < d; col_start += THREADS_PER_WARP * Lc) {
             #pragma unroll
@@ -606,11 +605,9 @@ __global__ void fa_kernel(
             }
         }
     }
-    
     __syncthreads();
     
     // Store to global memory (warp pair processes its assigned row range)
-    row_start = warp_tile_row_id * WMMA_M;
     if (row_start < Br) {
         for (int col_start = Lc * lane_id; col_start < d; col_start += THREADS_PER_WARP * Lc) {
             #pragma unroll
