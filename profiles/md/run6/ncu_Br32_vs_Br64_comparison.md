@@ -6,18 +6,18 @@ High-level NCU comparison of two fa_tc_v3 configurations: **Br=64 with 8×2=16 w
 
 ## GPU Speed Of Light Throughput
 
-| Metric Name | Br=32 | Br=64 | Diff (%) |
-|---|---|---|---|
-| **DRAM Frequency (Ghz)** | 6.24 | 6.24 | 0.00 |
-| **SM Frequency (Mhz)** | 824.93 | 798.98 | -3.14 |
-| **Elapsed Cycles** | 8,631,167 | 9,783,995 | 13.37 |
-| **Memory Throughput (%)** | **56.27** | 47.32 | **-8.95** |
-| **DRAM Throughput (%)** | 0.22 | 0.15 | -0.07 |
-| **Duration (ms)** | **10.33** | 12.10 | **-17.2%** 🎯 |
-| **L1/TEX Cache Throughput (%)** | 66.34 | 66.06 | -0.28 |
-| **L2 Cache Throughput (%)** | **7.80** | 2.91 | **-62.7%** ⚠️ |
-| **SM Active Cycles** | 7,262,302.97 | 6,917,795.10 | -4.75 |
-| **Compute (SM) Throughput (%)** | 55.15 | 47.32 | **-7.83** ⚠️ |
+| Metric Name | Br=32 | Br=64 |
+|---|---|---|
+| **DRAM Frequency (Ghz)** | 6.24 | 6.24 |
+| **SM Frequency (Mhz)** | 824.93 | 798.98 |
+| **Elapsed Cycles** | 8,631,167 | 9,783,995 |
+| **Memory Throughput (%)** | **56.27** | 47.32 |
+| **DRAM Throughput (%)** | 0.22 | 0.15 |
+| **Duration (ms)** | **10.33** | 12.10 🎯 |
+| **L1/TEX Cache Throughput (%)** | 66.34 | 66.06 |
+| **L2 Cache Throughput (%)** | **7.80** | 2.91 ⚠️ |
+| **SM Active Cycles** | 7,262,302.97 | 6,917,795.10 |
+| **Compute (SM) Throughput (%)** | 55.15 | 47.32 ⚠️ |
 
 ### Nsight Compute Observations
 
@@ -84,18 +84,18 @@ High-level NCU comparison of two fa_tc_v3 configurations: **Br=64 with 8×2=16 w
 
 ## GPU and Memory Workload Distribution
 
-| Metric Name | Br=32 | Br=64 | Diff (%) |
-|---|---|---|---|
-| **Average DRAM Active Cycles** | 139,861.33 | 113,037.33 | -19.16 |
-| Total DRAM Elapsed Cycles | 387,004,416 | 453,372,928 | +17.16 |
-| Average L1 Active Cycles | 7,262,302.97 | 6,917,795.10 | -4.75 |
-| Total L1 Elapsed Cycles | 496,552,498 | 560,144,070 | +12.81 |
-| **Average L2 Active Cycles** | **6,040,280.58** | 4,086,572.12 | **-32.28** ⚠️ |
-| Total L2 Elapsed Cycles | 206,890,728 | 239,582,520 | +15.80 |
-| Average SM Active Cycles | 7,262,302.97 | 6,917,795.10 | -4.75 |
-| Total SM Elapsed Cycles | 496,552,498 | 560,144,070 | +12.81 |
-| Average SMSP Active Cycles | 7,182,420.75 | 6,813,111.07 | -5.14 |
-| Total SMSP Elapsed Cycles | 1,986,209,992 | 2,240,576,280 | +12.80 |
+| Metric Name | Br=32 | Br=64 |
+|---|---|---|
+| **Average DRAM Active Cycles** | 139,861.33 | 113,037.33 |
+| Total DRAM Elapsed Cycles | 387,004,416 | 453,372,928 |
+| Average L1 Active Cycles | 7,262,302.97 | 6,917,795.10 |
+| Total L1 Elapsed Cycles | 496,552,498 | 560,144,070 |
+| **Average L2 Active Cycles** | **6,040,280.58** | 4,086,572.12 ⚠️ |
+| Total L2 Elapsed Cycles | 206,890,728 | 239,582,520 |
+| Average SM Active Cycles | 7,262,302.97 | 6,917,795.10 |
+| Total SM Elapsed Cycles | 496,552,498 | 560,144,070 |
+| Average SMSP Active Cycles | 7,182,420.75 | 6,813,111.07 |
+| Total SMSP Elapsed Cycles | 1,986,209,992 | 2,240,576,280 |
 
 ### Nsight Compute Observations
 
@@ -124,6 +124,20 @@ High-level NCU comparison of two fa_tc_v3 configurations: **Br=64 with 8×2=16 w
 
 > OPT - **Est. Speedup: 5.336%** (L2 load imbalance)
 > One or more L2 Slices have a much higher number of active cycles than the average. Maximum is 13.04% above average.
+
+---
+
+### Understanding the Load Imbalance Difference
+
+The larger SM/SMSP/L1 imbalance in Br=64 (29–30% vs 15–16% for Br=32) stems from **coarser block granularity**. With 58 SMs:
+- **Br=32**: 256 blocks ÷ 58 SMs ≈ **4.4 blocks/SM** (fine-grained, smooth distribution)
+- **Br=64**: 128 blocks ÷ 58 SMs ≈ **2.2 blocks/SM** (coarse-grained, high variance)
+
+With only ~2 blocks per SM, some SMs inevitably get 3 blocks while others get 2, creating larger variance in compute activity. Within Br=64's larger blocks (8×2=16 warps), uneven work distribution across the Br dimension amplifies this imbalance. 
+
+**Why L2 is unaffected**: L2 is **globally shared**—it services all SMs uniformly regardless of per-SM block distribution. Load imbalance on L2 reflects global memory traffic patterns, not local SM scheduling variance. Br=32's higher L2 activity (7.80% vs 2.91%) indicates better global memory reuse, not better L2 distribution.
+
+**Lesson**: More blocks → finer granularity → better dynamic load balancing.
 
 ---
 
