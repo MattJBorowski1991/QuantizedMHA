@@ -24,7 +24,6 @@ using namespace nvcuda;
 #define THREADS (WARPS_PER_BLOCK * THREADS_PER_WARP)
 #define FULL_MASK 0xffffffff
 #define PAD 0
-
 //Tensor Core parameters
 constexpr int WMMA_M = 8;
 constexpr int WMMA_N = 32;
@@ -140,7 +139,7 @@ static __device__ __forceinline__ void fp32_to_int8sram(
         if constexpr(transposeInput){
             int row = i / N;
             int col = i % N;
-            block_out[col * M + row] = static_cast<int8_t>(rounded);
+            block_out[col * (M + PAD) + row] = static_cast<int8_t>(rounded);
         }else{
             block_out[i] = static_cast<int8_t>(rounded);
         }

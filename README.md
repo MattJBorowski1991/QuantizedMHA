@@ -10,11 +10,11 @@ High-performance CUDA implementations of FlashAttention-2 with various optimizat
 |----|----|----|--------|-----------|---------|-------|-------|
 | No | No | No | [unfused](mha_kernels/unfused.cu) | 14.4 | [Run 1](profiles/md/run1/ncu_details.md) | 3 kernels: Q@K^T (6.5), softmax (2.2), P@V (5.7) | Baseline |
 | Yes | No | No | [fa](mha_kernels/fa.cu) | 8.33 | [Run 2](profiles/md/run2/ncu_details.md) | 1 fused kernel | - |
-| Yes | Yes | No | [fa_tc_v1a](mha_kernels/fa_tc_v1a.cu) | 5.77 | [Run 3](profiles/md/run3a/ncu_details.md) | 1 warp owns 16×d of Q | v. low occup |
+| Yes | Yes | No | [fa_tc_v1a](mha_kernels/fa_tc_v1a.cu) | 5.77 | [Run 3](profiles/md/run3a/ncu_high_level.md) | 1 warp owns 16×d of Q | v. low occup |
 | Yes | Yes | No | [fa_tc_v1b](mha_kernels/fa_tc_v1b.cu) | 6.00 | [Run 4](profiles/md/run4/ncu_details.md) | 1 warp owns 8×d of Q | - |
 | Yes | Yes | No | [fa_tc_v2](mha_kernels/fa_tc_v2.cu) | 8.29 | [Run 4](profiles/md/run4/ncu_details.md) | 2 warps own 8×d of Q | bank conflicts |
-| Yes | Yes | No | [fa_tc_v2a](mha_kernels/fa_tc_v2a.cu) | 6.25 | [Run 5](profiles/md/run5/ncu_details.md) | as above | Padding |
-| Yes | Yes | No | [fa_tc_v2b](mha_kernels/fa_tc_v2b.cu) | 9.60 | - | as above | Swizzling |
+| Yes | Yes | No | [fa_tc_v2a](mha_kernels/fa_tc_v2a.cu) | 6.25 | [Run 5](profiles/md/run5/ncu_details.md) | as above | +padding |
+| Yes | Yes | No | [fa_tc_v2b](mha_kernels/fa_tc_v2b.cu) | 9.60 | - | as above | +swizzling |
 | Yes | Yes | Yes | [fa_tc_int8_a](mha_kernels/fa_tc_int8_a.cu) | 9.04 | [Run 6](profiles/md/run6/ncu_details.md) | as above | based on v2a |
 
 ## Profiling Results
