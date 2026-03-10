@@ -15,7 +15,7 @@ High-performance CUDA implementations of FlashAttention-2 with various optimizat
 | Yes | Yes | No | [fa_tc_v2](mha_kernels/fa_tc_v2.cu) | 8.29 | [Run 4](profiles/md/run4/ncu_details.md) | 2 warps own 8×d of Q | bank conflicts |
 | Yes | Yes | No | [fa_tc_v2a](mha_kernels/fa_tc_v2a.cu) | 6.25 | [Run 5](profiles/md/run5/ncu_details.md) | as above | +padding |
 | Yes | Yes | No | [fa_tc_v2b](mha_kernels/fa_tc_v2b.cu) | 9.60 | - | as above | +swizzling |
-| Yes | Yes | Yes | [fa_tc_int8_a](mha_kernels/fa_tc_int8_a.cu) | 9.04 | [Run 6](profiles/md/run6/ncu_details.md) | as above | based on v2a |
+| Yes | Yes | Yes | [fa_tc_int8_a](mha_kernels/fa_tc_int8_a.cu) | 9.04 | [Run 6](profiles/md/run6/ncu_Br32_vs_Br64_highlevel.md) | as above | based on v2a |
 
 ## Profiling Results
 
