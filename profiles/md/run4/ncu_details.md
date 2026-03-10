@@ -1,6 +1,6 @@
 # Nsight Compute - Detailed Analysis
 
-Kernels profiled: [fa_tc_v1b.cu](../../../mha_kernels/fa_tc_v1b.cu) and [fa_tc_v2.cu](../../../mha_kernels/fa_tc_v2.cu).
+Kernels profiled: [fa_tc_v1b.cu](../../../mha_kernels/fa_tc_v1b.cu) and [fa_tc_v2a.cu](../../../mha_kernels/fa_tc_v2a.cu).
 
 ## Approach Overview
 
@@ -9,7 +9,7 @@ Increase warp occupancy in the Br-dimension by using 8×32×16 WMMA tile size in
 
 **Kernel Variants:**
 - **fa_tc_v1b:** Single-warp owns 8xd of Q (no SRAM overflow with PAD=16)
-- **fa_tc_v2:** Distribute warp work across d-dimension to two warps (SRAM overflow with PAD=16)
+- **fa_tc_v2a:** Distribute warp work across d-dimension to two warps (SRAM overflow with PAD=16)
 
 **Warp Work Distribution Strategy:**
 
@@ -27,14 +27,14 @@ Increase warp occupancy in the Br-dimension by using 8×32×16 WMMA tile size in
 
 **Code Implementations:**
 - **fa_tc_v1b** (`mha_kernels/fa_tc_v1b.cu`): Single warp owns 8×d of Q, PAD=16 (no SRAM overflow)
-- **fa_tc_v2** (`mha_kernels/fa_tc_v2.cu`): Two warps own 8×d of Q, PAD=0 (causes SRAM overflow when PAD=16). Allocated SRAM per block with PAD=0 is c.a. 48 kB with configured SRAM size fo 102.4 kB. With PAD=16 the configured size likely drops down to c.a. 64kB, which results in the overflow.
+- **fa_tc_v2a** (`mha_kernels/fa_tc_v2a.cu`): Two warps own 8×d of Q, PAD=0 (causes SRAM overflow when PAD=16). Allocated SRAM per block with PAD=0 is c.a. 48 kB with configured SRAM size fo 102.4 kB. With PAD=16 the configured size likely drops down to c.a. 64kB, which results in the overflow.
 
 **Bottleneck Visualization:**  
 ![Bottlenecks](../../images/run4/v1b_pad16_vs_v2_pad0_bottlenecks.png)
 
 ### Additional Validation Run
 
-An extra run with **Br=32** (instead of 64), **4×2 = 8 warps** per block, **PAD=16** was conducted for **fa_tc_v2** to confirm that bank conflicts are reduced to zero with **PAD=16** and latency lowered to **7.5 ms**.
+An extra run with **Br=32** (instead of 64), **4×2 = 8 warps** per block, **PAD=16** was conducted for **fa_tc_v2a** to confirm that bank conflicts are reduced to zero with **PAD=16** and latency lowered to **7.5 ms**.
 
 > Note: With **Br=16** this approach cannot be used due to SRAM overflow.
 
