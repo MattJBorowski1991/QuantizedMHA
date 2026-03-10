@@ -90,6 +90,8 @@ static __device__ __forceinline__ void fp32_to_int8sram(
     float block_min = INFINITY;
     float block_max = -INFINITY;
 
+    __shared__ float inv_sc_shared;
+
     if (warp_id == 0) {
         // accumulate a subset of warp results per lane in warp 0
         for (int w = lane_id; w < WARPS_PER_BLOCK; w += THREADS_PER_WARP) {
@@ -107,27 +109,41 @@ static __device__ __forceinline__ void fp32_to_int8sram(
         if (lane_id == 0) {
             float sc = fmaxf(fmaxf(fabs(block_max), fabs(block_min)) / 127.0f, 1e-8f); 
             block_scales[bid] = sc;
+            inv_sc_shared = 1.0f / sc;
         }
     }
     __syncthreads();
 
-    //normalize to [-128, 127]
-    float inv_sc = 1.0f / block_scales[bid];
+    // threads read inv_sc_shared from sram
+    float inv_sc = inv_sc_shared;
     for(int i = tid; i < size; i += THREADS){
+        // // Non-coalesced read causing mega stall left for reference:
+        // float v;
+        // if constexpr(transposeInput){
+        //     int row = i / N;
+        //     int col = i % N;
+        //     v = block_in[col * N + row];
+        // }else{
+        //     v = block_in[i];
+        // }
 
-        float v;
+        // float scaled = v * inv_sc;
+        // int rounded = __float2int_rn(scaled);
+        // rounded = (rounded < -128) ? -128 : ((rounded > 127) ? 127 : rounded);
+        // block_out[i] = static_cast<int8_t>(rounded);
+
+        float v = block_in[i];
+        float scaled = v * inv_sc;
+        int rounded = __float2int_rn(scaled);
+        rounded = (rounded < -128) ? -128 : ( (rounded > 127) ? 127 : rounded);
+
         if constexpr(transposeInput){
             int row = i / N;
             int col = i % N;
-            v = block_in[col * N + row];
+            block_out[col * M + row] = static_cast<int8_t>(rounded);
         }else{
-            v = block_in[i];
+            block_out[i] = static_cast<int8_t>(rounded);
         }
-
-        float scaled = v * inv_sc;
-        int rounded = __float2int_rn(scaled);
-        rounded = (rounded < -128) ? -128 : ((rounded > 127) ? 127 : rounded);
-        block_out[i] = static_cast<int8_t>(rounded);
     }
 }
 
