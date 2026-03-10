@@ -1,6 +1,6 @@
 # Br=32 vs Br=64 Profiling Comparison
 
-High-level NCU comparison of two fa_tc_v3 configurations: **Br=64 with 8×2=16 warps/block** vs **Br=32 with 4×2=8 warps/block**, with warp work distributed across both the block row dimension (Br) and embedding dimension (d). Both kernels compiled with `-maxrregcount=40` to control register pressure.
+High-level NCU comparison of two fa_tc_int8_a configurations: **Br=64 with 8×2=16 warps/block** vs **Br=32 with 4×2=8 warps/block**, with warp work distributed across both the block row dimension (Br) and embedding dimension (d). Both kernels compiled with `-maxrregcount=40` to control register pressure.
 
 > **Compilation Flag**: Both kernels compiled with `-maxrregcount=40` to limit register pressure and allow more blocks resident on GPU.
 
@@ -11,11 +11,11 @@ High-level NCU comparison of two fa_tc_v3 configurations: **Br=64 with 8×2=16 w
 | **DRAM Frequency (Ghz)** | 6.24 | 6.24 |
 | **SM Frequency (Mhz)** | 794.99 | 795.36 |
 | **Elapsed Cycles** | 7,190,366 | 9,707,774 |
-| **Memory Throughput (%)** | **68.95** | 50.18 |
+| **Memory Throughput (%)** | **68.95** | 50.18 ⚠️|
 | **DRAM Throughput (%)** | 0.23 | 0.14 |
-| **Duration (ms)** | **9.04** | 12.18 🎯 |
+| **Duration (ms)** | **9.04** 🎯| 12.18  |
 | **L1/TEX Cache Throughput (%)** | 77.68 | 71.87 |
-| **L2 Cache Throughput (%)** | **5.69** | 2.71 ⚠️ |
+| **L2 Cache Throughput (%)** | **5.69** | 2.71 |
 | **SM Active Cycles** | 6,388,004.91 | 6,770,460.12 |
 | **Compute (SM) Throughput (%)** | 68.95 | 50.18 ⚠️ |
 
