@@ -136,19 +136,66 @@ This section describes the actual implementation: block-wise processing with onl
 Each P_i @ V_i iteration has **distinct scales** (scale_P_i and scale_V_i), so dequantization must happen immediately after each matmul. Output is accumulated in fp32 to avoid mixing heterogeneous scaled int32 values.
 
 
-_______________
+---
 
+## IV. Implementation Notes & Optimization Challenges
 
-Needed to do some aggressive SRAM optimizations in order to accomodate the extra Sram necessary for int8 & int32 buffers, including a shared union (=aliasing) for scores_fp32, scores_int32 and temp_output_int32, q_block, scores_int8 (used for accumulation during online softmax). Code becomes less readable and more difficult to debug. CAVEAT: better don't touch wmma-related inputs/outputs not to ruin 16-byte allighmnet
+### SRAM Optimization & Memory Aliasing
 
-The largest drag on SRAM remaing the c_scratch buffer in WMMA so we can accumulate the results of the left warp and the right warp (per tile row).
+**Challenge:** Int8 quantization requires additional buffers for int8 and int32 data, increasing shared-memory pressure.
 
-Interestingly the SRAM config size (set by CUDA at runtime) for Br=32 is 102.4kB (with xx static SRAM allocation) and drops to 65.54 kB for Br=64 (with 45.31kB static SRAM allocation)! This causes only one block (instead of 3) per SM to fit and latency taking a 40% hit from 10ms to 14ms for the latter. The comparison of the two is below. 
+**Solution:** Implemented shared-memory union (aliasing) for temporary buffers:
+- `scores_fp32`, `scores_int32`, `temp_output_int32`
+- `q_block`, `scores_int8` (used for online softmax accumulation)
 
-At the setting of Br=32 the limting factor on the block limit (max 3) were there registers:
-- replacing __forceinline__ with __noinline__ reduced regs per thread by ~6-7% but at the same time it hit compute&mem throughbput by 4-5% => duration hit by 10%.
-- moving the stats arrays (max_new, sum_new, exp_max_diff) in online_softmax_and_accum_output from per-thread to shared memory did not yield a positive outcome
-- removing pragma unroll neither yielded a positive outcome
-- with `-maxrregcount=X` the compiler is more aggressive than just capping the regs per thread to X. e.g. for -maxrregcount=68 the number of regs per thread dropped from 69 to 60.
-- change of strategy: from trying to fit as many as possible warps per block, try instead as an alternative to fit more smaller blocks per SM => still good impact on occupancy
-- putting temp_output_int32 to the shared union caused the shared mem config size to decrease from 102.4 to 65.54 kB -->> cudaFuncSetAttribute solved it and kept the config at 102.4kB!!
+**Trade-off:** Code readability decreased; debugging complexity increased.
+
+**Critical Constraint:** Do not modify WMMA input/output buffers — maintaining 16-byte alignment is essential.
+
+---
+
+### SRAM Budget Bottleneck
+
+**Primary issue:** The `c_scratch` buffer in WMMA, required to accumulate partial results from left and right warps per tile row, consumes the largest portion of shared memory.
+
+**Unexpected finding:** SRAM configuration size varies significantly:
+- **Br=32:** 102.4 kB
+- **Br=64:** 65.54 kB (60% less)
+
+This causes Br=64 to fit only 1 block/SM instead of 3, **reducing latency by 40%** (10 ms → 14 ms).
+
+**Solution:** Use `cudaFuncSetAttribute()` in the launcher to force maximum SRAM configuration and maintain 102.4 kB for both settings.
+
+---
+
+### Register Pressure Optimization Attempts (Br=32)
+
+At Br=32, block-limit bottleneck is **registers** (limit: 3 blocks). Attempted solutions:
+
+| Approach | Register Savings | Throughput Impact | Latency Impact | Result |
+|---|---|---|---|---|
+| Replace `__forceinline__` with `__noinline__` | ~6–7% | **−4–5%** | **+10%** | ❌ Counterproductive |
+| Move stats arrays to shared memory | N/A | Neutral | Neutral | ❌ No improvement |
+| Remove `#pragma unroll` | N/A | Negative | Negative | ❌ No improvement |
+
+**Key learning:** `-maxrregcount=X` applies **compiler-wide optimization**, not just capping per-thread regs. Example: `-maxrregcount=68` reduced per-thread usage from 69 → 60 regs.
+
+---
+
+### Strategic Pivot: Multiple Smaller Blocks Over Fewer Large Blocks
+
+**Original goal:** Maximize warps per block to improve occupancy.
+
+**New goal:** Fit more smaller blocks per SM for better scheduling and load balancing (at the cost of fewer warps/block).
+
+**Outcome:** Achieved better occupancy while reducing per-block resource overhead and improving SM utilization.
+
+---
+
+### Shared Memory Configuration Bug & Fix
+
+**Issue:** Adding `temp_output_int32` to the shared union unexpectedly dropped SRAM config from 102.4 kB → 65.54 kB, halving block residency.
+
+**Root cause:** CUDA runtime dynamically sets SRAM configuration based on detected shared-memory usage patterns.
+
+**Fix:** Invoke ` cudaFuncSetAttribute((void*)kernel<...>, cudaFuncAttributePreferredSharedMemoryCarveout, 100)` in the launcher to lock SRAM at `100%` configuration, preserving block residency and latency.
