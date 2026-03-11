@@ -91,7 +91,7 @@ static __device__ __forceinline__ void fp32_to_int8sram(
             block_max = fmaxf(block_max, warp_maxs[l]);
         }
 
-        for(int off = THREADS_PER_WARP >> 1; off > 0; off >= 1){
+        for(int off = THREADS_PER_WARP >> 1; off > 0; off >>= 1){
             float mmin = __shfl_down_sync(FULL_MASK, block_min, off);
             float mmax = __shfl_down_sync(FULL_MASK, block_max, off);
             block_min = fminf(block_min, mmin);
@@ -127,7 +127,7 @@ static __device__ __forceinline__ void fp32_to_int8sram(
 }
 
 //int32_in in SRAM, fp32_out in DRAM (P@V) or SRAM (scores=Q@K^T)
-template<int M, int N, bool isOutputinDram>
+template<int M, int N, bool isOutputInDram>
 static __device__ __forceinline__ void int32sram_to_fp32(
     const int* __restrict__ int32_in,
     float* __restrict__ block_scales_A,
@@ -138,7 +138,7 @@ static __device__ __forceinline__ void int32sram_to_fp32(
     const int tid = threadIdx.x;
     int size = M * N;
 
-    float* block_in = int32_in;
+    const int* block_in = int32_in;
 
     float* block_out;
     if constexpr(isOutputInDram){
@@ -148,7 +148,17 @@ static __device__ __forceinline__ void int32sram_to_fp32(
     }
     
     for(int i = tid; i < size; i += THREADS){
-        block_out[i] = static_cast<float>(block_in[i]) * block_scales_A[bid] * block_scales_B[bid];
+        float scale_a = block_scales_A[0];
+        float scale_b = block_scales_B[0];
+        float int_val = static_cast<float>(block_in[i]);
+        float dequant = int_val * scale_a * scale_b;
+        
+        if(dequant > 3.0f) {
+            printf("[DEQUANT anomaly] i=%d int32=%d scale_A=%.10e scale_B=%.10e dequant=%.10e\n",
+                   i, block_in[i], scale_a, scale_b, dequant);
+        }
+        
+        block_out[i] = dequant;
     }
 }
 
@@ -249,6 +259,18 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
 
     //read block_scales_Q and block_scales_Kt to dequantize
     int32sram_to_fp32<Br, Bc + PAD, false>(scores_int32, const_cast<float*>(block_scales_Q + q_block_idx), const_cast<float*>(block_scales_Kt + q_block_idx), scores_fp32, q_block_idx);
+
+
+    //BUG: there are still many printed values of scores_fp32 that are different than 32: 0, 8.3796685934e-01, a lot of large values > e+10
+    
+    // if(tid == 0) {
+    //     int size = Br * (Bc + PAD);
+    //     for(int i = 0; i < size; i++) {
+    //         if(scores_fp32[i] > 32.0f) {
+    //             printf("[scores_fp32 anomaly q_idx=%d] i=%d value=%.10e\n", q_block_idx, i, scores_fp32[i]);
+    //         }
+    //     }
+    // }
 
     // Process WMMA_M query rows per warp (same as matmul_warp_tiled)
     for (int row_start = WMMA_M * warp_id; row_start < Br; row_start += WARPS_PER_BLOCK * WMMA_M) 
@@ -437,7 +459,7 @@ __global__ void fa_kernel(
     int row_start = warp_id * WMMA_N;
 
     //quantize Q once
-    fp32_to_int8sram<Br, d + PAD, true, false>(Q, block_scales_Q, q_block);
+    fp32_to_int8sram<Br, d + PAD, true, false>(Q, block_scales_Q, q_block, q_block_idx);
     
     init_output_and_stats<Br, Bc, d, Lc>(output, sum_exp, max_prev, max_curr);
 
@@ -449,8 +471,8 @@ __global__ void fa_kernel(
         const float *K_block = K + kv_block_idx * Bc * d;
         const float *V_block = V + kv_block_idx * Bc * d;
 
-        fp32_to_int8sram<Bc, d + PAD, true, true>(K_block, block_scales_Kt, kt);
-        fp32_to_int8sram<Bc, d + PAD, true, false>(V_block, block_scales_V, values);
+        fp32_to_int8sram<Bc, d + PAD, true, true>(K_block, block_scales_Kt, kt, kv_block_idx);
+        fp32_to_int8sram<Bc, d + PAD, true, false>(V_block, block_scales_V, values, kv_block_idx);
         __syncthreads();
         
         // Initialize max_curr for this iteration
