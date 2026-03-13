@@ -5,7 +5,6 @@
 #include "../include/config.h"
 #include "../include/launchers.h"
 #include "../utils/utils.cu"
-#include <stdio.h>
 
 #include "mma.h"
 #include <cuda_fp16.h>
@@ -349,7 +348,7 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
 
     fp32_to_int8sram<Br, Bc + PAD, false, false>(scores_fp32, block_scales_P, scores_int8, kv_block_idx);
     __syncthreads();
-    
+
     // Step 5: Accumulate O += (softmax probs) @ V
     // scores_int8: Br x Bc with stride Bc+PAD
     // values: Bc x d with stride d+PAD
