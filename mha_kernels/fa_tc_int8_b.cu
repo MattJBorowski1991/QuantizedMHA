@@ -5,6 +5,7 @@
 #include "../include/config.h"
 #include "../include/launchers.h"
 #include "../utils/utils.cu"
+#include <stdio.h>
 
 #include "mma.h"
 #include <cuda_fp16.h>
@@ -16,14 +17,14 @@ using namespace nvcuda;
 // 1 warp owns a 16 x d chunk of Q and performs serial wmma, one 16x16x16 tile per iteration
 
 #define THREADS_PER_WARP 32
-#define WARPS_PER_BLOCK 4
+#define WARPS_PER_BLOCK 8
 #define THREADS (WARPS_PER_BLOCK * THREADS_PER_WARP)
 #define FULL_MASK 0xffffffff
 #define PAD 0
 
 //Tensor Core parameters
-constexpr int WMMA_M = 16;
-constexpr int WMMA_N = 16;
+constexpr int WMMA_M = 8;
+constexpr int WMMA_N = 32;
 constexpr int WMMA_K = 16;
 
 static_assert(Br == WMMA_M * WARPS_PER_BLOCK, "Block size needs to equal number of warps times number of rows each warp handles");
@@ -442,7 +443,7 @@ __global__ void fa_kernel(
     float *block_scales_V = block_scales + 2 * BLOCKS;
     float *block_scales_P = block_scales + 3 * BLOCKS;
 
-    int row_start = warp_id * WMMA_N;
+    int row_start = warp_id * WMMA_M;  // FIX: Use WMMA_M (tile height), not WMMA_N (tile width)
 
     //quantize Q once
     fp32_to_int8sram<Br, d + PAD, true, false>(Q, block_scales_Q, q_block, q_block_idx);
@@ -494,7 +495,6 @@ __global__ void fa_kernel(
         __syncthreads();
     } //end of kv_block_idx for loop iteration
 
-
     // Epilogue: normalize output and write to global memory (warp/lane distribution)
     if(row_start < Br){
         for (int col_start = Lc * lane_id; col_start < d; col_start += THREADS_PER_WARP * Lc) {
@@ -505,10 +505,10 @@ __global__ void fa_kernel(
                     int row = row_start + i;
                     int col = col_start + j;
                     if (row < Br && col < d) {
-                        if (sum_exp[row] > 1e-10f) {  // Use small epsilon instead of > 0
+                        if (sum_exp[row] > 1e-10f) {
                             output[row * (d + PAD) + col] /= sum_exp[row];
                         } else {
-                            output[row * (d + PAD) + col] = 0.0f;  // Handle zero sum_exp case
+                            output[row * (d + PAD) + col] = 0.0f;
                         }
                     }
                 }
@@ -527,7 +527,9 @@ __global__ void fa_kernel(
                     int row = row_start + i;
                     int col = col_start + j;
                     if (q_block_idx * Br + row < N && col < d) {
-                        O[(q_block_idx * Br + row) * d + col] = output[row * (d + PAD) + col];
+                        float write_val = output[row * (d + PAD) + col];
+                        int global_idx = (q_block_idx * Br + row) * d + col;
+                        O[global_idx] = write_val;
                     }
                 }
             }
