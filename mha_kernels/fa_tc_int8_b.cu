@@ -17,14 +17,14 @@ using namespace nvcuda;
 // 1 warp owns a 16 x d chunk of Q and performs serial wmma, one 16x16x16 tile per iteration
 
 #define THREADS_PER_WARP 32
-#define WARPS_PER_BLOCK 8
+#define WARPS_PER_BLOCK 4
 #define THREADS (WARPS_PER_BLOCK * THREADS_PER_WARP)
 #define FULL_MASK 0xffffffff
 #define PAD 0
 
 //Tensor Core parameters
-constexpr int WMMA_M = 8;
-constexpr int WMMA_N = 32;
+constexpr int WMMA_M = 16;
+constexpr int WMMA_N = 16;
 constexpr int WMMA_K = 16;
 
 static_assert(Br == WMMA_M * WARPS_PER_BLOCK, "Block size needs to equal number of warps times number of rows each warp handles");
@@ -426,7 +426,7 @@ __global__ void fa_kernel(
     __shared__ __align__(16) int8_t kt[d * (Bc + PAD)];
 
     __shared__ float scores_fp32[Br * (Bc + PAD)];
-    __shared__ int scores_int32[Br * (Bc + PAD)]; 
+    __shared__ int scores_int32[Br * (Bc + PAD)];
     __shared__ __align__(16) int8_t scores_int8[Br * (Bc + PAD)];
 
     __shared__ int temp_output_int32[Br * (Bc + PAD)];
