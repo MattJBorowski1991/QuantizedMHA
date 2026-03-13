@@ -1,0 +1,507 @@
+==PROF== Connected to process 93442 (/teamspace/studios/this_studio/QuantizedMHA/bin/profile_fa_tc_int8_b)
+==PROF== Profiling "extract_mat" - 0: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 1: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 2: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 3: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 4: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 5: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 6: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 7: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 8: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 9: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 10: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 11: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 12: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 13: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 14: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 15: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 16: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 17: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 18: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 19: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 20: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 21: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 22: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 23: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 24: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 25: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 26: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 27: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 28: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 29: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 30: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 31: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 32: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 33: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 34: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 35: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 36: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 37: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 38: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 39: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 40: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 41: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 42: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 43: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 44: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 45: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 46: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 47: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 48: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 49: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 50: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 51: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 52: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 53: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 54: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 55: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 56: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 57: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 58: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 59: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 60: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 61: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 62: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 63: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 64: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 65: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 66: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 67: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 68: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 69: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 70: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 71: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 72: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 73: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 74: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 75: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 76: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 77: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 78: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 79: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 80: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 81: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 82: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 83: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 84: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 85: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 86: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 87: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 88: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 89: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 90: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 91: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 92: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 93: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 94: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 95: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 96: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 97: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 98: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 99: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 100: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 101: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 102: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 103: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 104: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 105: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 106: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 107: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 108: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 109: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 110: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 111: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 112: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 113: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 114: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 115: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 116: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 117: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 118: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 119: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 120: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 121: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 122: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 123: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 124: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 125: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 126: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 127: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 128: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 129: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 130: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 131: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 132: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 133: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 134: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 135: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 136: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 137: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 138: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 139: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 140: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 141: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 142: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 143: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 144: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 145: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 146: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 147: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 148: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 149: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 150: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 151: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 152: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 153: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 154: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 155: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 156: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 157: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 158: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 159: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 160: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 161: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 162: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 163: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 164: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 165: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 166: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 167: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 168: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 169: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 170: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 171: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 172: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 173: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 174: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 175: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 176: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 177: 0%....50%....100% - 8 passes
+==PROF== Profiling "fa_kernel" - 178: 0%....50%....100% - 8 passes
+==PROF== Profiling "concat_mat" - 179: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 180: 0%....50%....100% - 8 passes
+==PROF== Profiling "extract_mat" - 181: 0%....50%.==PROF== Trying to shutdown target application
+ - 5 passes
+==ERROR== Failed to profile "extract_mat" in process 93442
+==PROF== Trying to shutdown target application
+==ERROR== An error occurred while trying to profile.
+[93442] profile_fa_tc_int8_b@127.0.0.1
+  void extract_mat<16>(const float *, float *, int, int, int, int, int, int) (2, 512, 1)x(16, 16, 1), Context 1, Stream 13, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         6.16
+    SM Frequency                    Mhz       782.82
+    Elapsed Cycles                cycle         7095
+    Memory Throughput                 %        49.75
+    DRAM Throughput                   %        49.75
+    Duration                         us         9.06
+    L1/TEX Cache Throughput           %        23.65
+    L2 Cache Throughput               %        28.04
+    SM Active Cycles              cycle      5017.62
+    Compute (SM) Throughput           %        15.80
+    ----------------------- ----------- ------------
+
+    OPT   This kernel exhibits low compute throughput and memory bandwidth utilization relative to the peak performance 
+          of this device. Achieved compute throughput and/or memory bandwidth below 60.0% of peak typically indicate    
+          latency issues. Look at Scheduler Statistics and Warp State Statistics for potential reasons.                 
+
+    Section: Launch Statistics
+    -------------------------------- --------------- ---------------
+    Metric Name                          Metric Unit    Metric Value
+    -------------------------------- --------------- ---------------
+    Block Size                                                   256
+    Function Cache Configuration                     CachePreferNone
+    Grid Size                                                   1024
+    Registers Per Thread             register/thread              16
+    Shared Memory Configuration Size           Kbyte           16.38
+    Driver Shared Memory Per Block       Kbyte/block            1.02
+    Dynamic Shared Memory Per Block       byte/block               0
+    Static Shared Memory Per Block        byte/block               0
+    # SMs                                         SM              58
+    Threads                                   thread          262144
+    Uses Green Context                                             0
+    Waves Per SM                                                2.94
+    -------------------------------- --------------- ---------------
+
+    OPT   Est. Speedup: 33.33%                                                                                          
+          A wave of thread blocks is defined as the maximum number of blocks that can be executed in parallel on the    
+          target GPU. The number of blocks in a wave depends on the number of multiprocessors and the theoretical       
+          occupancy of the kernel. This kernel launch results in 2 full waves and a partial wave of 328 thread blocks.  
+          Under the assumption of a uniform execution duration of all thread blocks, the partial wave may account for   
+          up to 33.3% of the total kernel runtime with a lower occupancy of 27.4%. Try launching a grid with no         
+          partial wave. The overall impact of this tail effect also lessens with the number of full waves executed for  
+          a grid. See the Hardware Model                                                                                
+          (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-hw-model) description for more      
+          details on launch configurations.                                                                             
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block           16
+    Block Limit Shared Mem                block           16
+    Block Limit Warps                     block            6
+    Theoretical Active Warps per SM        warp           48
+    Theoretical Occupancy                     %          100
+    Achieved Occupancy                        %        72.60
+    Achieved Active Warps Per SM           warp        34.85
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 27.4%                                                                                     
+          The difference between calculated theoretical (100.0%) and measured achieved occupancy (72.6%) can be the     
+          result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can   
+          occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices   
+          Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on     
+          optimizing occupancy.                                                                                         
+
+    Section: GPU and Memory Workload Distribution
+    -------------------------- ----------- ------------
+    Metric Name                Metric Unit Metric Value
+    -------------------------- ----------- ------------
+    Average DRAM Active Cycles       cycle     27762.67
+    Total DRAM Elapsed Cycles        cycle       334848
+    Average L1 Active Cycles         cycle      5017.62
+    Total L1 Elapsed Cycles          cycle       414704
+    Average L2 Active Cycles         cycle      4581.33
+    Total L2 Elapsed Cycles          cycle       176760
+    Average SM Active Cycles         cycle      5017.62
+    Total SM Elapsed Cycles          cycle       414704
+    Average SMSP Active Cycles       cycle      4977.51
+    Total SMSP Elapsed Cycles        cycle      1658816
+    -------------------------- ----------- ------------
+
+  void extract_mat<16>(const float *, float *, int, int, int, int, int, int) (2, 512, 1)x(16, 16, 1), Context 1, Stream 13, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         6.19
+    SM Frequency                    Mhz       784.56
+    Elapsed Cycles                cycle         7212
+    Memory Throughput                 %        48.89
+    DRAM Throughput                   %        48.89
+    Duration                         us         9.18
+    L1/TEX Cache Throughput           %        24.19
+    L2 Cache Throughput               %        27.59
+    SM Active Cycles              cycle      4920.52
+    Compute (SM) Throughput           %        16.17
+    ----------------------- ----------- ------------
+
+    OPT   This kernel exhibits low compute throughput and memory bandwidth utilization relative to the peak performance 
+          of this device. Achieved compute throughput and/or memory bandwidth below 60.0% of peak typically indicate    
+          latency issues. Look at Scheduler Statistics and Warp State Statistics for potential reasons.                 
+
+    Section: Launch Statistics
+    -------------------------------- --------------- ---------------
+    Metric Name                          Metric Unit    Metric Value
+    -------------------------------- --------------- ---------------
+    Block Size                                                   256
+    Function Cache Configuration                     CachePreferNone
+    Grid Size                                                   1024
+    Registers Per Thread             register/thread              16
+    Shared Memory Configuration Size           Kbyte           16.38
+    Driver Shared Memory Per Block       Kbyte/block            1.02
+    Dynamic Shared Memory Per Block       byte/block               0
+    Static Shared Memory Per Block        byte/block               0
+    # SMs                                         SM              58
+    Threads                                   thread          262144
+    Uses Green Context                                             0
+    Waves Per SM                                                2.94
+    -------------------------------- --------------- ---------------
+
+    OPT   Est. Speedup: 33.33%                                                                                          
+          A wave of thread blocks is defined as the maximum number of blocks that can be executed in parallel on the    
+          target GPU. The number of blocks in a wave depends on the number of multiprocessors and the theoretical       
+          occupancy of the kernel. This kernel launch results in 2 full waves and a partial wave of 328 thread blocks.  
+          Under the assumption of a uniform execution duration of all thread blocks, the partial wave may account for   
+          up to 33.3% of the total kernel runtime with a lower occupancy of 25.7%. Try launching a grid with no         
+          partial wave. The overall impact of this tail effect also lessens with the number of full waves executed for  
+          a grid. See the Hardware Model                                                                                
+          (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-hw-model) description for more      
+          details on launch configurations.                                                                             
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block           16
+    Block Limit Shared Mem                block           16
+    Block Limit Warps                     block            6
+    Theoretical Active Warps per SM        warp           48
+    Theoretical Occupancy                     %          100
+    Achieved Occupancy                        %        74.29
+    Achieved Active Warps Per SM           warp        35.66
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 25.71%                                                                                    
+          The difference between calculated theoretical (100.0%) and measured achieved occupancy (74.3%) can be the     
+          result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can   
+          occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices   
+          Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on     
+          optimizing occupancy.                                                                                         
+
+    Section: GPU and Memory Workload Distribution
+    -------------------------- ----------- ------------
+    Metric Name                Metric Unit Metric Value
+    -------------------------- ----------- ------------
+    Average DRAM Active Cycles       cycle     27786.67
+    Total DRAM Elapsed Cycles        cycle       340992
+    Average L1 Active Cycles         cycle      4920.52
+    Total L1 Elapsed Cycles          cycle       405272
+    Average L2 Active Cycles         cycle      4422.38
+    Total L2 Elapsed Cycles          cycle       179448
+    Average SM Active Cycles         cycle      4920.52
+    Total SM Elapsed Cycles          cycle       405272
+    Average SMSP Active Cycles       cycle      4865.61
+    Total SMSP Elapsed Cycles        cycle      1621088
+    -------------------------- ----------- ------------
+
+  void extract_mat<16>(const float *, float *, int, int, int, int, int, int) (2, 512, 1)x(16, 16, 1), Context 1, Stream 13, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         6.17
+    SM Frequency                    Mhz       783.38
+    Elapsed Cycles                cycle         7201
+    Memory Throughput                 %        48.96
+    DRAM Throughput                   %        48.96
+    Duration                         us         9.18
+    L1/TEX Cache Throughput           %        23.63
+    L2 Cache Throughput               %        27.67
+    SM Active Cycles              cycle      4956.05
+    Compute (SM) Throughput           %        15.78
+    ----------------------- ----------- ------------
+
+    OPT   This kernel exhibits low compute throughput and memory bandwidth utilization relative to the peak performance 
+          of this device. Achieved compute throughput and/or memory bandwidth below 60.0% of peak typically indicate    
+          latency issues. Look at Scheduler Statistics and Warp State Statistics for potential reasons.                 
+
+    Section: Launch Statistics
+    -------------------------------- --------------- ---------------
+    Metric Name                          Metric Unit    Metric Value
+    -------------------------------- --------------- ---------------
+    Block Size                                                   256
+    Function Cache Configuration                     CachePreferNone
+    Grid Size                                                   1024
+    Registers Per Thread             register/thread              16
+    Shared Memory Configuration Size           Kbyte           16.38
+    Driver Shared Memory Per Block       Kbyte/block            1.02
+    Dynamic Shared Memory Per Block       byte/block               0
+    Static Shared Memory Per Block        byte/block               0
+    # SMs                                         SM              58
+    Threads                                   thread          262144
+    Uses Green Context                                             0
+    Waves Per SM                                                2.94
+    -------------------------------- --------------- ---------------
+
+    OPT   Est. Speedup: 33.33%                                                                                          
+          A wave of thread blocks is defined as the maximum number of blocks that can be executed in parallel on the    
+          target GPU. The number of blocks in a wave depends on the number of multiprocessors and the theoretical       
+          occupancy of the kernel. This kernel launch results in 2 full waves and a partial wave of 328 thread blocks.  
+          Under the assumption of a uniform execution duration of all thread blocks, the partial wave may account for   
+          up to 33.3% of the total kernel runtime with a lower occupancy of 26.2%. Try launching a grid with no         
+          partial wave. The overall impact of this tail effect also lessens with the number of full waves executed for  
+          a grid. See the Hardware Model                                                                                
+          (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-hw-model) description for more      
+          details on launch configurations.                                                                             
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block           16
+    Block Limit Shared Mem                block           16
+    Block Limit Warps                     block            6
+    Theoretical Active Warps per SM        warp           48
+    Theoretical Occupancy                     %          100
+    Achieved Occupancy                        %        73.81
+    Achieved Active Warps Per SM           warp        35.43
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 26.19%                                                                                    
+          The difference between calculated theoretical (100.0%) and measured achieved occupancy (73.8%) can be the     
+          result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can   
+          occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices   
+          Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on     
+          optimizing occupancy.                                                                                         
+
+    Section: GPU and Memory Workload Distribution
+    -------------------------- ----------- ------------
+    Metric Name                Metric Unit Metric Value
+    -------------------------- ----------- ------------
+    Average DRAM Active Cycles       cycle        27744
+    Total DRAM Elapsed Cycles        cycle       339968
+    Average L1 Active Cycles         cycle      4956.05
+    Total L1 Elapsed Cycles          cycle       415406
+    Average L2 Active Cycles         cycle      4470.04
+    Total L2 Elapsed Cycles          cycle       179112
+    Average SM Active Cycles         cycle      4956.05
+    Total SM Elapsed Cycles          cycle       415406
+    Average SMSP Active Cycles       cycle      4897.24
+    Total SMSP Elapsed Cycles        cycle      1661624
+    -------------------------- ----------- ------------
+
+  void fa_kernel<64, 32, 32, 1>(const float *, const float *, const float *, float *, float *, int, int, float) (128, 1, 1)x(128, 1, 1), Context 1, Stream 13, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         6.24
+    SM Frequency                    Mhz       798.54
+    Elapsed Cycles                cycle      7910275
+    Memory Throughput                 %        38.96
+    DRAM Throughput                   %         0.12
+    Duration                         ms         9.87
+    L1/TEX Cache Throughput           %        59.96
+    L2 Cache Throughput               %         1.26
+    SM Active Cycles              cycle   5126666.21
+    Compute (SM) Throughput           %        38.96
+    ----------------------- ----------- ------------
+
+    OPT   This kernel exhibits low compute throughput and memory bandwidth utilization relative to the peak performance 
+          of this device. Achieved compute throughput and/or memory bandwidth below 60.0% of peak typically indicate    
+          latency issues. Look at Scheduler Statistics and Warp State Statistics for potential reasons.                 
+
+    Section: Launch Statistics
+    -------------------------------- --------------- ---------------
+    Metric Name                          Metric Unit    Metric Value
+    -------------------------------- --------------- ---------------
+    Block Size                                                   128
+    Function Cache Configuration                     CachePreferNone
+    Grid Size                                                    128
+    Registers Per Thread             register/thread             103
+    Shared Memory Configuration Size           Kbyte          102.40
+    Driver Shared Memory Per Block       Kbyte/block            1.02
+    Dynamic Shared Memory Per Block       byte/block               0
+    Static Shared Memory Per Block       Kbyte/block           39.82
+    # SMs                                         SM              58
+    Threads                                   thread           16384
+    Uses Green Context                                             0
+    Waves Per SM                                                1.10
+    -------------------------------- --------------- ---------------
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block            4
+    Block Limit Shared Mem                block            2
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        15.49
+    Achieved Active Warps Per SM           warp         7.44
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
+          shared memory.                                                                                                
+

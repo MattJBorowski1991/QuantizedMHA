@@ -42,6 +42,8 @@ static __device__ __forceinline__ void fp32_to_int8sram(
     const int lane_id = tid % THREADS_PER_WARP;
     const int warp_id = tid / THREADS_PER_WARP;
 
+    if(bid == 0) bid = blockIdx.x;
+
     //TODO: put fp32_in in SRAM depending on SRAM pressure
 
     const float* block_in;
@@ -146,20 +148,15 @@ static __device__ __forceinline__ void int32sram_to_fp32(
     }else{
         block_out = fp32_out;
     }
-    
+
     for(int i = tid; i < size; i += THREADS){
         float scale_a = block_scales_A[0];
         float scale_b = block_scales_B[0];
-        float int_val = static_cast<float>(block_in[i]);
-        float dequant = int_val * scale_a * scale_b;
-        
-        if(dequant > 3.0f) {
-            printf("[DEQUANT anomaly] i=%d int32=%d scale_A=%.10e scale_B=%.10e dequant=%.10e\n",
-                   i, block_in[i], scale_a, scale_b, dequant);
-        }
+        float dequant = (float)block_in[i] * scale_a * scale_b;
         
         block_out[i] = dequant;
     }
+    __syncthreads();
 }
 
 template <bool add_to_output = false, int M, int N, int K>
@@ -258,24 +255,12 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     int q_block_idx = blockIdx.x;
 
     //read block_scales_Q and block_scales_Kt to dequantize
-    int32sram_to_fp32<Br, Bc + PAD, false>(scores_int32, const_cast<float*>(block_scales_Q + q_block_idx), const_cast<float*>(block_scales_Kt + q_block_idx), scores_fp32, q_block_idx);
-
-
-    //BUG: there are still many printed values of scores_fp32 that are different than 32: 0, 8.3796685934e-01, a lot of large values > e+10
-    
-    // if(tid == 0) {
-    //     int size = Br * (Bc + PAD);
-    //     for(int i = 0; i < size; i++) {
-    //         if(scores_fp32[i] > 32.0f) {
-    //             printf("[scores_fp32 anomaly q_idx=%d] i=%d value=%.10e\n", q_block_idx, i, scores_fp32[i]);
-    //         }
-    //     }
-    // }
+    int32sram_to_fp32<Br, Bc + PAD, false>(scores_int32, const_cast<float*>(block_scales_Q + q_block_idx), const_cast<float*>(block_scales_Kt + kv_block_idx), scores_fp32, q_block_idx);
+    __syncthreads();
 
     // Process WMMA_M query rows per warp (same as matmul_warp_tiled)
     for (int row_start = WMMA_M * warp_id; row_start < Br; row_start += WARPS_PER_BLOCK * WMMA_M) 
     {
-        
         // Local arrays to track max, sum, and exp_max_diff for WMMA_M rows
         float max_new[WMMA_M], sum_new[WMMA_M], exp_max_diff[WMMA_M];
         #pragma unroll
@@ -363,12 +348,14 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     __syncthreads();
 
     fp32_to_int8sram<Br, Bc + PAD, false, false>(scores_fp32, block_scales_P, scores_int8, kv_block_idx);
+    __syncthreads();
     
     // Step 5: Accumulate O += (softmax probs) @ V
     // scores_int8: Br x Bc with stride Bc+PAD
     // values: Bc x d with stride d+PAD
     // output: Br x d with stride d+PAD
     wmma_A_B<false, Br, d, Bc>(scores_int8, values, temp_output_int32, Bc + PAD, d + PAD, d + PAD);
+    __syncthreads();
 
     for(int i = tid; i < Br * (d + PAD); i += THREADS){
         output[i] += (float)(temp_output_int32[i]) * block_scales_P[kv_block_idx] * block_scales_V[kv_block_idx];
@@ -471,8 +458,8 @@ __global__ void fa_kernel(
         const float *K_block = K + kv_block_idx * Bc * d;
         const float *V_block = V + kv_block_idx * Bc * d;
 
-        fp32_to_int8sram<Bc, d + PAD, true, true>(K_block, block_scales_Kt, kt, kv_block_idx);
-        fp32_to_int8sram<Bc, d + PAD, true, false>(V_block, block_scales_V, values, kv_block_idx);
+        fp32_to_int8sram<Bc, d + PAD, false, true>(K_block, block_scales_Kt, kt, kv_block_idx);
+        fp32_to_int8sram<Bc, d + PAD, false, false>(V_block, block_scales_V, values, kv_block_idx);
         __syncthreads();
         
         // Initialize max_curr for this iteration
@@ -486,11 +473,11 @@ __global__ void fa_kernel(
             }
         }
         __syncthreads();
-        
+
         // Compute scores = Q @ K^T = Br x Bc
         wmma_A_B<false, Br, Bc, d>(q_block, kt, scores_int32, d + PAD, Bc + PAD, Bc + PAD);
         __syncthreads();
-        
+
         // Online softmax (Br x Bc) + output accumulation (Br x d)
         online_softmax_and_accum_output<Br, Bc, Lc, d>
         (max_curr, max_prev, sum_exp, scores_int32, scores_int8, scores_fp32, block_scales_Q, block_scales_Kt, block_scales_P, temp_output_int32, output, values, block_scales_V, inv_sqrt_d, kv_block_idx);
