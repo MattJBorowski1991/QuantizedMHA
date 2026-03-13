@@ -422,21 +422,30 @@ __global__ void fa_kernel(
     // Shared memory layout with proper 16-byte alignment for tensor core operations
     // Use 1D arrays with stride-based indexing for wmma_A_B compatibility
 
-    __shared__ __align__(16) int8_t q_block[Br * (d + PAD)];
+    // __shared__ __align__(16) int8_t q_block[Br * (d + PAD)];
+    __shared__ __align__(16) union{
+        int8_t q_block[Br * (d + PAD)];
+        int8_t scores_int8[d * (Bc + PAD)];
+    } union_buffer;
+
+    int8_t* q_block = union_buffer.q_block;
+
     __shared__ __align__(16) int8_t kt[d * (Bc + PAD)];
 
-    __shared__ float scores_fp32[Br * (Bc + PAD)];
-    __shared__ int scores_int32[Br * (Bc + PAD)];
-    __shared__ __align__(16) int8_t scores_int8[Br * (Bc + PAD)];
 
-    __shared__ int temp_output_int32[Br * (Bc + PAD)];
-    __shared__ float output[Br * (d + PAD)];
+    __shared__ __align__(16) float scores_fp32[Br * (Bc + PAD)];
+    __shared__ __align__(16) int scores_int32[Br * (Bc + PAD)];
+    // __shared__ __align__(16) int8_t scores_int8[Br * (Bc + PAD)];
+    int8_t* scores_int8 = union_buffer.scores_int8;
+
+    __shared__ __align__(16) int temp_output_int32[Br * (Bc + PAD)];
+    __shared__ __align__(16) float output[Br * (d + PAD)];
 
     __shared__ __align__(16) int8_t values[Bc * (d + PAD)];
 
-    __shared__ float sum_exp[Br];
-    __shared__ float max_prev[Br];
-    __shared__ float max_curr[Br];
+    __shared__ __align__(16) float sum_exp[Br];
+    __shared__ __align__(16) float max_prev[Br];
+    __shared__ __align__(16) float max_curr[Br];
 
     float *block_scales_Q = block_scales;
     float *block_scales_Kt = block_scales + BLOCKS;
