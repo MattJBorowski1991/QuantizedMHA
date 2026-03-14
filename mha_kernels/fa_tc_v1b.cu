@@ -16,7 +16,7 @@ using namespace nvcuda;
 // 1 warp owns a 8 x d chunk of Q and performs serial wmma, one 8x32x16 tile per iteration
 
 #define THREADS_PER_WARP 32
-#define WARPS_PER_BLOCK 8
+#define WARPS_PER_BLOCK 4
 #define FULL_MASK 0xffffffff
 #define PAD 0
 

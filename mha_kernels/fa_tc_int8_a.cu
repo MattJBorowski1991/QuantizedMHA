@@ -19,7 +19,7 @@ using namespace nvcuda;
 
 #define THREADS_PER_WARP 32
 #define WARPS_PER_TILE_ROW 2
-#define WARP_TILE_ROWS 8
+#define WARP_TILE_ROWS 4
 #define WARPS_PER_BLOCK (WARP_TILE_ROWS * WARPS_PER_TILE_ROW)
 #define THREADS (WARPS_PER_BLOCK * THREADS_PER_WARP)
 #define FULL_MASK 0xffffffff

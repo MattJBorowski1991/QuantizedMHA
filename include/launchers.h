@@ -3,8 +3,11 @@
 #include <cuda_runtime.h>
 #include <cmath>
 #include "config.h"
-#include "../utils/utils.cu"
+#include "../utils/utils.h"
 
+// Forward declaration of solve function (implemented in kernel files)
+extern "C" void solve(const float *Q, const float *K, const float *V, float *output, 
+                      int N, int d_model, int h);
 
 // Generic solve implementation template for all kernels.
 // KernelFn: callable with signature void(float* q_s, float* k_s, float* v_s, float* out_s, 

@@ -25,7 +25,7 @@ template<int TILE>
 void launch_extract_mat(
     const float* A, float* B, 
     int row_off, int col_off, 
-    int M_A, int N_A, int M_B, int N_B, cudaStream_t stream = 0){
+    int M_A, int N_A, int M_B, int N_B, cudaStream_t stream){
     dim3 threads(TILE, TILE);
     dim3 blocks((N_B + TILE - 1) / TILE, (M_B + TILE - 1) / TILE);
     extract_mat<TILE><<<blocks, threads, 0, stream>>>(
@@ -36,7 +36,7 @@ template<int TILE>
 void launch_concat_mat(
     float* A, const float* B, 
     int row_off, int col_off, 
-    int M_A, int N_A, int M_B, int N_B, cudaStream_t stream = 0){
+    int M_A, int N_A, int M_B, int N_B, cudaStream_t stream){
     dim3 threads(TILE, TILE);
     dim3 blocks((N_B + TILE - 1) / TILE, (M_B + TILE - 1) / TILE);
     concat_mat<TILE><<<blocks, threads, 0, stream>>>(
@@ -63,5 +63,11 @@ static __device__ __forceinline__ void apply_rope(float* row, int pos, int d, fl
         row[k + d / 2] = x * sin_a + y * cos_a;
     }
 }
+
+// Explicit template instantiation for TILE=16 (value from config.h)
+template void launch_extract_mat<16>(
+    const float*, float*, int, int, int, int, int, int, cudaStream_t);
+template void launch_concat_mat<16>(
+    float*, const float*, int, int, int, int, int, int, cudaStream_t);
 
 #endif //UTILS_CU

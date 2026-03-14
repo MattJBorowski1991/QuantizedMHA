@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal example: call `torch_ext` MHA wrapper, warmup + timed loop.
-
-This script attempts to call `torch_ext.solve(Q, K, V)` (preferred) or
-falls back to pointer-style calls if the extension exposes a lower-level API.
+"""Minimal example: call `torch_ext` MHA wrapper with kernel selection, warmup + timed loop.
 """
 import time
 import argparse
@@ -15,6 +12,8 @@ def main():
     parser.add_argument('--N', type=int, default=128)
     parser.add_argument('--d_model', type=int, default=512)
     parser.add_argument('--h', type=int, default=8)
+    parser.add_argument('--kernel', type=str, default='fa_tc_int8_b', 
+                       help='Kernel variant to use')
     parser.add_argument('--warmups', type=int, default=10)
     parser.add_argument('--iters', type=int, default=50)
     parser.add_argument('--save', type=str, default='examples/torch_output.npy')
@@ -36,16 +35,13 @@ def main():
     K = torch.randn(N, d_model, device=device, dtype=torch.float32)
     V = torch.randn(N, d_model, device=device, dtype=torch.float32)
 
-    # Try the high-level API first: torch_ext.solve(Q, K, V)
+    # Validate tensor shapes
+    assert Q.shape == (N, d_model), f"Q shape {Q.shape} != ({N}, {d_model})"
+    assert K.shape == (N, d_model), f"K shape {K.shape} != ({N}, {d_model})"
+    assert V.shape == (N, d_model), f"V shape {V.shape} != ({N}, {d_model})"
+    
     def call_solve():
-        try:
-            return torch_ext.solve(Q, K, V)
-        except TypeError:
-            # Fallback: pointer-style (extension may expect raw pointers and ints)
-            try:
-                return torch_ext.solve(Q.data_ptr(), K.data_ptr(), V.data_ptr(), N, d_model, h)
-            except Exception as e:
-                raise RuntimeError('Unable to call torch_ext.solve with any known signature') from e
+        return torch_ext.flash_solve(Q, K, V, d_model, h, kernel=args.kernel)
 
     # Warmup
     for _ in range(args.warmups):
@@ -60,7 +56,7 @@ def main():
     dt = (time.time() - t0) / args.iters
 
     ms = dt * 1000.0
-    print(f'Avg latency: {ms:.3f} ms/iter over {args.iters} iters')
+    print(f'[{args.kernel}] Avg latency: {ms:.3f} ms/iter over {args.iters} iters')
 
     # Save output if it's a tensor-like object
     if hasattr(out, 'cpu'):
