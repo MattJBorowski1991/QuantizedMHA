@@ -1,4 +1,4 @@
-I. SRAM optimization
+I. SRAM optimization (for Br=64)
 
 I.1. Sram setup before any optimization (atomized sram buffers)
 
@@ -47,5 +47,36 @@ I.2.2. same for applying a union buffer for scores_int32 and temp_output_int32 (
 
 I.2.3. Same for kt and values , however accuracy decrease is smaller :Mismatch at index: 7643392: got=0.997797 ref=1 tol=0.001
 
-I.2.4. combining q_block with scores_int8 - did not cause any accuracy error!
+I.2.4. combining q_block with scores_int8 - did not cause any accuracy error! Difference? WMMA only touches one of them (q_block). WMMA operations have special hardware state/cache assumptions about their output buffers??
 
+I.2.5. Force-checked pairing up all the largest buffers (8192b each) into a union buffer - none of the pairs worked due to either accuraccy or correcntess errors
+
+
+II. SRAM allocation after introducing the two (small) union buffers: 
+
+Buffer	Dimensions	Data Type	Size	Union	WMMA
+q_block	64 × 32	int8_t	2,048 B	✅ 1	input
+scores_int8	64 × 32	int8_t	2,048 B	✅ 1	output
+kt	32 × 32	int8_t	1,024 B	✅ kv	input
+values	32 × 32	int8_t	1,024 B	✅ kv	input
+scores_fp32	64 × 32	float	8,192 B	❌	none
+scores_int32	64 × 32	int	8,192 B	❌	output
+temp_output_int32	64 × 32	int	8,192 B	❌	output
+output	64 × 32	float	8,192 B	❌	none
+sum_exp	64	float	256 B	❌	none
+max_prev	64	float	256 B	❌	none
+max_curr	64	float	256 B	❌	none
+Total			36,608 B		
+
+
+III. Subsequently we lower Br from 64 to 32, as noted in run6 (link) and change the tile from 16x16x16 to 8x16x32:
+
+There is no accurac problem for 16x16x16 but there is a 0.4% error for 8x16x32!!!! And this is for both Br=64 and Br=32
+
+
+
+
+
+. Extra notes
+
+For occupancy what matters is Warps per SM and not Warps per Block!

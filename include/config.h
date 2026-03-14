@@ -7,7 +7,7 @@
 constexpr int TILE = 16;
 
 // FlashAttention block sizes (standard FA1 notation)
-constexpr int Br = 64;             // Query block row size
+constexpr int Br = 32;             // Query block row size
 constexpr int Bc = 32;             // Key/Value block column size
 
 // FlashAttention Warp-level tile parameters (warp-tiled matmul)
