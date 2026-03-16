@@ -20,10 +20,7 @@ using namespace nvcuda;
 #define WARPS_PER_BLOCK 4
 #define THREADS (WARPS_PER_BLOCK * THREADS_PER_WARP)
 #define FULL_MASK 0xffffffff
-#define PAD 0
-
-// Set to 1 to print all intermediate values for index 0 (block 0, thread 0)
-#define printIntermediateValues 0
+#define PAD 16
 
 //Tensor Core parameters
 constexpr int WMMA_M = 8;
@@ -33,7 +30,7 @@ constexpr int WMMA_K = 16;
 static_assert(Br == WMMA_M * WARPS_PER_BLOCK, "Block size needs to equal number of warps times number of rows each warp handles");
 
 template<int M, int N_in, int N_out, bool isInputInDram, bool transposeInput = false>
-static __device__ __forceinline__ void fp32_to_int8sram(
+static __device__ void fp32_to_int8sram(
     const float* __restrict__ fp32_in, //for inputs: Q: Nxd, K^T: Nxd, P: Br x Bc, V: Bc x d
     float* __restrict__ block_scales,
     int8_t* __restrict__ int8_out,
@@ -132,7 +129,7 @@ static __device__ __forceinline__ void fp32_to_int8sram(
 
 //int32_in in SRAM, fp32_out in DRAM (P@V) or SRAM (scores=Q@K^T)
 template<int M, int N, bool isOutputInDram>
-static __device__ __forceinline__ void int32sram_to_fp32(
+static __device__ void int32sram_to_fp32(
     const int* __restrict__ int32_in,
     float* __restrict__ block_scales_A,
     float* __restrict__ block_scales_B,
@@ -162,7 +159,7 @@ static __device__ __forceinline__ void int32sram_to_fp32(
 }
 
 template <bool add_to_output = false, int M, int N, int K>
-static __device__ __forceinline__ void wmma_A_B(
+static __device__ void wmma_A_B(
     const int8_t* __restrict__ A,     // M x K (Q: Br x d, or P: Br x Bc)
     const int8_t* __restrict__ B,    //  K x N (K^T: d x Bc, or V: Bc x d)
     int* C,                       //  M x N (scores: Br x Bc, or output: Br x d)
@@ -230,10 +227,13 @@ static __device__ __forceinline__ void wmma_A_B(
 // Online softmax: WMMA_M rows per warp (matching matmul parallelism)
 // Scale scores, find max, compute softmax probs, update statistics, rescale output, accumulate O += P @ V
 template<int Br, int Bc, int Lc, int d, int stride_scores = 0, int stride_output = 0>
-__device__ __forceinline__ void online_softmax_and_accum_output(
+__device__ void online_softmax_and_accum_output(
     float* __restrict__ max_cur,
     float* __restrict__ max_prev,
     float* __restrict__ sum_exp,
+    float* __restrict__ max_new,
+    float* __restrict__ sum_new,
+    float* __restrict__ exp_max_diff,
     int* scores_int32,      // Q@K^T, layout [Br x (Bc + PAD)]
     int8_t* scores_int8,    // quantized scores [Br x (Bc + PAD)]
     float* scores_fp32,     // for the softmax calculations 
@@ -255,112 +255,80 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     int warp_id = tid / 32;
     int lane_id = tid % 32;
     int q_block_idx = blockIdx.x;
-#if printIntermediateValues
-    const bool trace0 = (q_block_idx == 0 && tid == 0);
-#endif
 
     //read block_scales_Q and block_scales_Kt to dequantize
     int32sram_to_fp32<Br, Bc + PAD, false>(scores_int32, const_cast<float*>(block_scales_Q + q_block_idx), const_cast<float*>(block_scales_Kt + kv_block_idx), scores_fp32, q_block_idx);
     __syncthreads();
-#if printIntermediateValues
-    if (trace0) printf("[kv=%d] scores_int32[0]=%d  scores_fp32_dequant[0]=%.6e\n", kv_block_idx, scores_int32[0], scores_fp32[0]);
-#endif
 
     // Process WMMA_M query rows per warp (same as matmul_warp_tiled)
     for (int row_start = WMMA_M * warp_id; row_start < Br; row_start += WARPS_PER_BLOCK * WMMA_M) 
     {
-        // Local arrays to track max, sum, and exp_max_diff for WMMA_M rows
-        float max_new[WMMA_M], sum_new[WMMA_M], exp_max_diff[WMMA_M];
         #pragma unroll
         for (int i = 0; i < WMMA_M; i++) {
-            max_new[i] = max_prev[row_start + i];
-            sum_new[i] = 0.0f;
-        }
-        
-        // Step 1: Find max in scores for each row and scale by 1/sqrt(d)
-        for (int col_start = Lc * lane_id; col_start < Bc; col_start += THREADS_PER_WARP * Lc) {
-            #pragma unroll
-            for (int i = 0; i < WMMA_M; i++) {
+            int row_idx = row_start + i;
+            float max_new_val = max_prev[row_idx];
+
+            // Step 1: Find max in scores for this row and scale by 1/sqrt(d)
+            for (int col_start = Lc * lane_id; col_start < Bc; col_start += THREADS_PER_WARP * Lc) {
                 #pragma unroll
                 for (int j = 0; j < Lc; j++) {
-                    int row_idx = row_start + i;
                     int col_idx = col_start + j;
                     if (col_idx < Bc) {
-                        float score_scaled = scores_fp32[row_idx * sc_stride + col_idx] * inv_sqrt_d;
-                        max_new[i] = fmaxf(max_new[i], score_scaled);
-                        scores_fp32[row_idx * sc_stride + col_idx] = score_scaled;
+                        int idx = row_idx * sc_stride + col_idx;
+                        float score_scaled = scores_fp32[idx] * inv_sqrt_d;
+                        max_new_val = fmaxf(max_new_val, score_scaled);
+                        scores_fp32[idx] = score_scaled;
                     }
                 }
             }
-        }
-        
-        // Warp reduction to get global max for each of the WMMA_M rows
-        #pragma unroll
-        for (int i = 0; i < WMMA_M; i++) {
-            #pragma unroll
-            for (int shift = THREADS_PER_WARP / 2; shift >= 1; shift >>= 1) {
-                max_new[i] = fmaxf(max_new[i], __shfl_xor_sync(FULL_MASK, max_new[i], shift));
-            }
-        }
-#if printIntermediateValues
-        if (trace0 && row_start == 0) printf("[kv=%d] scores_fp32_scaled[0]=%.6e  row0_max_new=%.6e\n", kv_block_idx, scores_fp32[0], max_new[0]);
-#endif
 
-        // Step 2: Compute exp(score - max) and accumulate sum
-        for (int col_start = Lc * lane_id; col_start < Bc; col_start += THREADS_PER_WARP * Lc) {
-            #pragma unroll
-            for (int i = 0; i < WMMA_M; i++) {
+            for (int shift = THREADS_PER_WARP / 2; shift >= 1; shift >>= 1) {
+                max_new_val = fmaxf(max_new_val, __shfl_xor_sync(FULL_MASK, max_new_val, shift));
+            }
+
+            // Step 2: Compute exp(score - max) and accumulate sum for this row
+            float sum_new_val = 0.0f;
+            for (int col_start = Lc * lane_id; col_start < Bc; col_start += THREADS_PER_WARP * Lc) {
                 #pragma unroll
                 for (int j = 0; j < Lc; j++) {
-                    int row_idx = row_start + i;
                     int col_idx = col_start + j;
                     int idx = row_idx * sc_stride + col_idx;
 
-                    if (row_idx < Br && col_idx < Bc) {
-                        //calculate scores, accumulate sum
-                        float prob = expf(scores_fp32[row_idx * sc_stride + col_idx] - max_new[i]);
+                    if (col_idx < Bc) {
+                        float prob = expf(scores_fp32[idx] - max_new_val);
                         scores_fp32[idx] = prob;
-                        sum_new[i] += prob;
+                        sum_new_val += prob;
                     }else{
                         scores_fp32[idx] = 0.0f;
                     }
                 }
             }
-        }
-        
-        // Warp reduction to get global sum for each row
-        #pragma unroll
-        for (int i = 0; i < WMMA_M; i++) {
-            #pragma unroll
-            for (int shift = THREADS_PER_WARP / 2; shift >= 1; shift >>= 1) {
-                sum_new[i] += __shfl_xor_sync(FULL_MASK, sum_new[i], shift);
-            }
-        }
-#if printIntermediateValues
-        if (trace0 && row_start == 0) printf("[kv=%d] softmax_prob[0]=%.6e  row0_sum_new=%.6e\n", kv_block_idx, scores_fp32[0], sum_new[0]);
-#endif
 
-        // Step 3: Update max and sum statistics (only first lane writes)
-        #pragma unroll
-        for (int i = 0; i < WMMA_M; i++) {
-            exp_max_diff[i] = expf(max_prev[row_start + i] - max_new[i]);
+            for (int shift = THREADS_PER_WARP / 2; shift >= 1; shift >>= 1) {
+                sum_new_val += __shfl_xor_sync(FULL_MASK, sum_new_val, shift);
+            }
+
+            // Step 3: Update max and sum statistics (only first lane writes)
+            float exp_max_diff_val = expf(max_prev[row_idx] - max_new_val);
             if (lane_id == 0) {
-                max_cur[row_start + i] = max_new[i];
-                sum_exp[row_start + i] = exp_max_diff[i] * sum_exp[row_start + i] + sum_new[i];
+                max_new[row_idx] = max_new_val;
+                sum_new[row_idx] = sum_new_val;
+                exp_max_diff[row_idx] = exp_max_diff_val;
+
+                max_cur[row_idx] = max_new[row_idx];
+                sum_exp[row_idx] = exp_max_diff[row_idx] * sum_exp[row_idx] + sum_new[row_idx];
+            }
+
+            __syncwarp(FULL_MASK);
+
+            // Step 4: Rescale output accumulator by exp(max_old - max_new) for this row
+            float exp_scale = exp_max_diff[row_idx];
+            for (int d_idx = lane_id; d_idx < d; d_idx += THREADS_PER_WARP) {
+                output[row_idx * out_stride + d_idx] *= exp_scale;
             }
         }
+
         __syncthreads();  // Ensure all threads see updated sum_exp and max_cur
-#if printIntermediateValues
-        if (trace0 && row_start == 0) printf("[kv=%d] max_cur[0]=%.6e  sum_exp[0]=%.6e\n", kv_block_idx, max_cur[0], sum_exp[0]);
-#endif
-        
-        // Step 4: Rescale output accumulator by exp(max_old - max_new) for each row
-        for (int d_idx = lane_id; d_idx < d; d_idx += THREADS_PER_WARP) {
-            #pragma unroll
-            for (int i = 0; i < WMMA_M; i++) {
-                output[(row_start + i) * out_stride + d_idx] *= exp_max_diff[i];
-            }
-        }
     } //end for loop with row_start
     __syncthreads();
 
@@ -373,9 +341,6 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
 
     fp32_to_int8sram<Br, Bc + PAD, Bc + PAD, false, false>(scores_fp32, block_scales_P, scores_int8, kv_block_idx);
     __syncthreads();
-#if printIntermediateValues
-    if (trace0) printf("[kv=%d] scale_p=%.6e  scores_int8[0]=%d\n", kv_block_idx, block_scales_P[kv_block_idx], (int)scores_int8[0]);
-#endif
 
     // Step 5: Accumulate O += (softmax probs) @ V
     // scores_int8: Br x Bc with stride Bc+PAD
@@ -383,21 +348,15 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     // output: Br x d with stride d+PAD
     wmma_A_B<false, Br, d, Bc>(scores_int8, values, temp_output_int32, Bc + PAD, d + PAD, d + PAD);
     __syncthreads();
-#if printIntermediateValues
-    if (trace0) printf("[kv=%d] scale_v=%.6e  temp_output_int32[0]=%d\n", kv_block_idx, block_scales_V[kv_block_idx], temp_output_int32[0]);
-#endif
 
     for(int i = tid; i < Br * (d + PAD); i += THREADS){
         output[i] += (float)(temp_output_int32[i]) * block_scales_P[kv_block_idx] * block_scales_V[kv_block_idx];
     }
     __syncthreads();
-#if printIntermediateValues
-    if (trace0) printf("[kv=%d] output[0]_after_accum=%.6e\n", kv_block_idx, output[0]);
-#endif
 }
 
 template <int Br, int Bc, int d, int Lc>
-__device__ __forceinline__ void init_output_and_stats(
+__device__ void init_output_and_stats(
     float* __restrict__ output,
     float* __restrict__ sum_exp,
     float* __restrict__ max_prev,
@@ -453,46 +412,48 @@ __global__ void fa_kernel(
     const int warp_id = tid / 32;
     const int lane_id = tid % 32;
 
-    // Shared memory layout with proper 16-byte alignment for tensor core operations
-    // Use 1D arrays with stride-based indexing for wmma_A_B compatibility
+    // SRAM allocation in union buffers to minimize SRAM usage
 
     __shared__ __align__(16) union{
         int8_t q_block[Br * (d + PAD)];
-        int8_t scores_int8[Br * (Bc + PAD)];
+        int8_t scores[Br * (Bc + PAD)];
     } int8_union_buffer;
+
+    int8_t* q_block = int8_union_buffer.q_block;
+    int8_t* scores_int8 = int8_union_buffer.scores;
 
     __shared__ __align__(16) union{
         int8_t kt[d * (Bc + PAD)];
         int8_t values[Bc * (d + PAD)];
     } int8_union_buffer_2;
 
-    // __shared__ __align__(16) float scores_fp32[Br * (Bc + PAD)];
+    int8_t* kt = int8_union_buffer_2.kt;
+    int8_t* values = int8_union_buffer_2.values;
 
     __shared__ __align__(16) union{
         float scores_fp32[Br * (Bc + PAD)];
-        int scores[Br * (Bc + PAD)];
+        int scores_int32[Br * (Bc + PAD)];
         int temp_output[Br * (d + PAD)];
-    } union_buffer_1;
+        float output[Br * (d + PAD)];
+    } shared_temp_buffer;
 
-    float* scores_fp32 = union_buffer_1.scores_fp32;
-    int* scores_int32 = union_buffer_1.scores;
-    int* temp_output_int32 = union_buffer_1.temp_output;
+    float* output = shared_temp_buffer.output;
 
-    __shared__ __align__(16) float output[Br * (d + PAD)];
+    float* scores_fp32 = shared_temp_buffer.scores_fp32;
+    int* scores_int32 = shared_temp_buffer.scores_int32;
+    int* temp_output_int32 = shared_temp_buffer.temp_output;
 
-    __shared__ __align__(16) float sum_exp[Br];
-    __shared__ __align__(16) float max_prev[Br];
-    __shared__ __align__(16) float max_curr[Br];
+    __shared__ float sum_exp[Br];
+    __shared__ float max_prev[Br];
+    __shared__ float max_curr[Br];
+    __shared__ float max_new[Br];
+    __shared__ float sum_new[Br];
+    __shared__ float exp_max_diff[Br];
 
     float *block_scales_Q = block_scales;
     float *block_scales_Kt = block_scales + BLOCKS;
     float *block_scales_V = block_scales + 2 * BLOCKS;
     float *block_scales_P = block_scales + 3 * BLOCKS;
-
-    int8_t* q_block = int8_union_buffer.q_block;
-    int8_t* scores_int8 = int8_union_buffer.scores_int8;
-    int8_t* kt = int8_union_buffer_2.kt;
-    int8_t* values = int8_union_buffer_2.values;
 
     int row_start = warp_id * WMMA_M;  // FIX: Use WMMA_M (tile height), not WMMA_N (tile width)
 
@@ -502,24 +463,17 @@ __global__ void fa_kernel(
     int num_kv_blocks = (N + Bc - 1) / Bc;
     for (int kv_block_idx = 0; kv_block_idx < num_kv_blocks; kv_block_idx++) {
 
-        // q_block and scores_int8 share the same SRAM buffer, so Q must be re-quantized
-        // at the start of each KV iteration before it is consumed by the Q @ K^T matmul.
+        // quantize Q for this KV iteration
         fp32_to_int8sram<Br, d, d + PAD, true, false>(Q, block_scales_Q, q_block, q_block_idx);
         __syncthreads();
-    #if printIntermediateValues
-        if (q_block_idx == 0 && tid == 0 && kv_block_idx == 0) printf("[Q] scale_q=%.6e  q_int8[0]=%d\n", block_scales_Q[q_block_idx], (int)q_block[0]);
-    #endif
 
         // pointers for this K,V block iteration
         const float *K_block = K + kv_block_idx * Bc * d;
         const float *V_block = V + kv_block_idx * Bc * d;
 
-        // kt and values share SRAM, so quantize K first and consume it before reusing for V
+        // kt and values share SRAM; quantize/consume K first
         fp32_to_int8sram<Bc, d, d + PAD, false, true>(K_block, block_scales_Kt, kt, kv_block_idx);
         __syncthreads();
-#if printIntermediateValues
-        if (q_block_idx == 0 && tid == 0) printf("[kv=%d] scale_kt=%.6e\n", kv_block_idx, block_scales_Kt[kv_block_idx]);
-#endif
         
         // Initialize max_curr for this iteration
         // Warp warp_id initializes rows [warp_id*WMMA_M, (warp_id+1)*WMMA_M)
@@ -537,17 +491,14 @@ __global__ void fa_kernel(
         wmma_A_B<false, Br, Bc, d>(q_block, kt, scores_int32, d + PAD, Bc + PAD, Bc + PAD);
         __syncthreads();
 
-        // Reuse the same SRAM region for V only after QK matmul has finished using kt
+        // Reuse the same SRAM region for V only after QK matmul finished using kt
         fp32_to_int8sram<Bc, d, d + PAD, false, false>(V_block, block_scales_V, values, kv_block_idx);
         __syncthreads();
-    #if printIntermediateValues
-        if (q_block_idx == 0 && tid == 0) printf("[kv=%d] scale_v=%.6e\n", kv_block_idx, block_scales_V[kv_block_idx]);
-    #endif
 
 
         // Online softmax (Br x Bc) + output accumulation (Br x d)
         online_softmax_and_accum_output<Br, Bc, Lc, d>
-        (max_curr, max_prev, sum_exp, scores_int32, scores_int8, scores_fp32, block_scales_Q, block_scales_Kt, block_scales_P, temp_output_int32, output, values, block_scales_V, inv_sqrt_d, kv_block_idx);
+        (max_curr, max_prev, sum_exp, max_new, sum_new, exp_max_diff, scores_int32, scores_int8, scores_fp32, block_scales_Q, block_scales_Kt, block_scales_P, temp_output_int32, output, values, block_scales_V, inv_sqrt_d, kv_block_idx);
         __syncthreads();
         
         // Copy max_curr to max_prev for next iteration (only for rows this warp processes)
@@ -564,9 +515,6 @@ __global__ void fa_kernel(
 
     // Epilogue: normalize output and write to global memory (warp/lane distribution)
     if(row_start < Br){
-#if printIntermediateValues
-        if (q_block_idx == 0 && tid == 0) printf("[epilogue] output[0]_before_norm=%.6e  sum_exp[0]=%.6e\n", output[0], sum_exp[0]);
-#endif
         for (int col_start = Lc * lane_id; col_start < d; col_start += THREADS_PER_WARP * Lc) {
             #pragma unroll
             for (int i = 0; i < WMMA_M; i++) {
@@ -600,9 +548,6 @@ __global__ void fa_kernel(
                         float write_val = output[row * (d + PAD) + col];
                         int global_idx = (q_block_idx * Br + row) * d + col;
                         O[global_idx] = write_val;
-#if printIntermediateValues
-                        if (q_block_idx == 0 && row == 0 && col == 0) printf("[output] O[0]=%.6e\n", write_val);
-#endif
                     }
                 }
             }
