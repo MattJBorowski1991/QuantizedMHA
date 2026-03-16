@@ -456,21 +456,27 @@ __global__ void fa_kernel(
     // Shared memory layout with proper 16-byte alignment for tensor core operations
     // Use 1D arrays with stride-based indexing for wmma_A_B compatibility
 
-    __shared__ __align__(16) int8_t q_block[Br * (d + PAD)];
-    __shared__ __align__(16) int8_t scores_int8[Br * (Bc + PAD)];
-
-    __shared__ __align__(16) int8_t kt[d * (Bc + PAD)];
-    __shared__ __align__(16) int8_t values[Bc * (d + PAD)];
-
-    __shared__ __align__(16) float scores_fp32[Br * (Bc + PAD)];
+    __shared__ __align__(16) union{
+        int8_t q_block[Br * (d + PAD)];
+        int8_t scores_int8[Br * (Bc + PAD)];
+    } int8_union_buffer;
 
     __shared__ __align__(16) union{
+        int8_t kt[d * (Bc + PAD)];
+        int8_t values[Bc * (d + PAD)];
+    } int8_union_buffer_2;
+
+    // __shared__ __align__(16) float scores_fp32[Br * (Bc + PAD)];
+
+    __shared__ __align__(16) union{
+        float scores_fp32[Br * (Bc + PAD)];
         int scores[Br * (Bc + PAD)];
         int temp_output[Br * (d + PAD)];
-    } int32_union_buffer;
+    } union_buffer_1;
 
-    int* scores_int32 = int32_union_buffer.scores;
-    int* temp_output_int32 = int32_union_buffer.temp_output;
+    float* scores_fp32 = union_buffer_1.scores_fp32;
+    int* scores_int32 = union_buffer_1.scores;
+    int* temp_output_int32 = union_buffer_1.temp_output;
 
     __shared__ __align__(16) float output[Br * (d + PAD)];
 
@@ -483,14 +489,12 @@ __global__ void fa_kernel(
     float *block_scales_V = block_scales + 2 * BLOCKS;
     float *block_scales_P = block_scales + 3 * BLOCKS;
 
-    int row_start = warp_id * WMMA_M;  // FIX: Use WMMA_M (tile height), not WMMA_N (tile width)
+    int8_t* q_block = int8_union_buffer.q_block;
+    int8_t* scores_int8 = int8_union_buffer.scores_int8;
+    int8_t* kt = int8_union_buffer_2.kt;
+    int8_t* values = int8_union_buffer_2.values;
 
-    //quantize Q once
-    fp32_to_int8sram<Br, d, d + PAD, true, false>(Q, block_scales_Q, q_block, q_block_idx);
-    __syncthreads();
-#if printIntermediateValues
-    if (q_block_idx == 0 && tid == 0) printf("[Q] scale_q=%.6e  q_int8[0]=%d\n", block_scales_Q[q_block_idx], (int)q_block[0]);
-#endif
+    int row_start = warp_id * WMMA_M;  // FIX: Use WMMA_M (tile height), not WMMA_N (tile width)
 
     init_output_and_stats<Br, Bc, d, Lc>(output, sum_exp, max_prev, max_curr);
 
@@ -498,15 +502,23 @@ __global__ void fa_kernel(
     int num_kv_blocks = (N + Bc - 1) / Bc;
     for (int kv_block_idx = 0; kv_block_idx < num_kv_blocks; kv_block_idx++) {
 
+        // q_block and scores_int8 share the same SRAM buffer, so Q must be re-quantized
+        // at the start of each KV iteration before it is consumed by the Q @ K^T matmul.
+        fp32_to_int8sram<Br, d, d + PAD, true, false>(Q, block_scales_Q, q_block, q_block_idx);
+        __syncthreads();
+    #if printIntermediateValues
+        if (q_block_idx == 0 && tid == 0 && kv_block_idx == 0) printf("[Q] scale_q=%.6e  q_int8[0]=%d\n", block_scales_Q[q_block_idx], (int)q_block[0]);
+    #endif
+
         // pointers for this K,V block iteration
         const float *K_block = K + kv_block_idx * Bc * d;
         const float *V_block = V + kv_block_idx * Bc * d;
 
+        // kt and values share SRAM, so quantize K first and consume it before reusing for V
         fp32_to_int8sram<Bc, d, d + PAD, false, true>(K_block, block_scales_Kt, kt, kv_block_idx);
-        fp32_to_int8sram<Bc, d, d + PAD, false, false>(V_block, block_scales_V, values, kv_block_idx);
         __syncthreads();
 #if printIntermediateValues
-        if (q_block_idx == 0 && tid == 0) printf("[kv=%d] scale_kt=%.6e  scale_v=%.6e\n", kv_block_idx, block_scales_Kt[kv_block_idx], block_scales_V[kv_block_idx]);
+        if (q_block_idx == 0 && tid == 0) printf("[kv=%d] scale_kt=%.6e\n", kv_block_idx, block_scales_Kt[kv_block_idx]);
 #endif
         
         // Initialize max_curr for this iteration
@@ -524,6 +536,13 @@ __global__ void fa_kernel(
         // Compute scores = Q @ K^T = Br x Bc
         wmma_A_B<false, Br, Bc, d>(q_block, kt, scores_int32, d + PAD, Bc + PAD, Bc + PAD);
         __syncthreads();
+
+        // Reuse the same SRAM region for V only after QK matmul has finished using kt
+        fp32_to_int8sram<Bc, d, d + PAD, false, false>(V_block, block_scales_V, values, kv_block_idx);
+        __syncthreads();
+    #if printIntermediateValues
+        if (q_block_idx == 0 && tid == 0) printf("[kv=%d] scale_v=%.6e\n", kv_block_idx, block_scales_V[kv_block_idx]);
+    #endif
 
 
         // Online softmax (Br x Bc) + output accumulation (Br x d)
