@@ -45,8 +45,6 @@ static __device__ __forceinline__ void fp32_to_int8sram(
     const int lane_id = tid % THREADS_PER_WARP;
     const int warp_id = tid / THREADS_PER_WARP;
 
-    if(bid == 0) bid = blockIdx.x;
-
     //TODO: put fp32_in in SRAM depending on SRAM pressure
 
     const float* block_in;

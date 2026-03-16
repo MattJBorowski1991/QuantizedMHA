@@ -86,3 +86,18 @@ There is no accurac problem for 16x16x16 but there is a 0.4% error for 8x16x32!!
  Padding is needed only in SRAM buffers -the output destinations for WMMA operations (q_block, scores_int8, kt, values, etc.) need padding for alignment and bank conflict avoidance.
 
 DRAM inputs (Q, K, V) don't need padding—they're raw [N, d] layouts. Padding should only be added when writing to SRAM.
+
+
+3. Debugging races when aliasing SRAM buffers.
+
+3.1. Find shared memory hazards (test only for small N e.g. N=64)
+
+compute-sanitizer --tool racecheck --racecheck-report all --racecheck-detect-level info --show-backtrace yes --force-blocking-launches --kernel-name kns=fa_kernel ./bin/profile_fa_tc_int8_b --warmup=0 --runs=1
+
+3.2. Find Bad Barrier usage
+
+compute-sanitizer --tool synccheck --show-backtrace yes --force-blocking-launches ./bin/profile_fa_tc_int8_b --warmup=0 --runs=1
+
+3.3. Find reads of uninitialized memory
+
+compute-sanitizer --tool initcheck --show-backtrace yes --force-blocking-launches ./bin/profile_fa_tc_int8_b --warmup=0 --runs=1
