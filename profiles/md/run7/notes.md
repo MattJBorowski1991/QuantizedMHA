@@ -79,4 +79,10 @@ There is no accurac problem for 16x16x16 but there is a 0.4% error for 8x16x32!!
 
 . Extra notes
 
-For occupancy what matters is Warps per SM and not Warps per Block!
+1. For occupancy what matters is Warps per SM and not Warps per Block!
+
+2. For avoidance of doubt: 
+
+ Padding is needed only in SRAM buffers -the output destinations for WMMA operations (q_block, scores_int8, kt, values, etc.) need padding for alignment and bank conflict avoidance.
+
+DRAM inputs (Q, K, V) don't need padding—they're raw [N, d] layouts. Padding should only be added when writing to SRAM.

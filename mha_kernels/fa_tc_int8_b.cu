@@ -22,6 +22,9 @@ using namespace nvcuda;
 #define FULL_MASK 0xffffffff
 #define PAD 0
 
+// Set to 1 to print all intermediate values for index 0 (block 0, thread 0)
+#define printIntermediateValues 0
+
 //Tensor Core parameters
 constexpr int WMMA_M = 8;
 constexpr int WMMA_N = 32;
@@ -29,7 +32,7 @@ constexpr int WMMA_K = 16;
 
 static_assert(Br == WMMA_M * WARPS_PER_BLOCK, "Block size needs to equal number of warps times number of rows each warp handles");
 
-template<int M, int N, bool isInputInDram, bool transposeInput = false>
+template<int M, int N_in, int N_out, bool isInputInDram, bool transposeInput = false>
 static __device__ __forceinline__ void fp32_to_int8sram(
     const float* __restrict__ fp32_in, //for inputs: Q: Nxd, K^T: Nxd, P: Br x Bc, V: Bc x d
     float* __restrict__ block_scales,
@@ -37,7 +40,7 @@ static __device__ __forceinline__ void fp32_to_int8sram(
     int bid
 ){
     const int tid = threadIdx.x;
-    int size = M * N;
+    int size = M * N_in;  // DRAM elements: M rows × N_in cols
 
     const int lane_id = tid % THREADS_PER_WARP;
     const int warp_id = tid / THREADS_PER_WARP;
@@ -119,11 +122,12 @@ static __device__ __forceinline__ void fp32_to_int8sram(
         rounded = (rounded < -128) ? -128 : ((rounded > 127) ? 127 : rounded);
 
         if constexpr(transposeInput){
-            int row = i / N;
-            int col = i % N;
+            int row = i / N_in;   // which DRAM input row
+            int col = i % N_in;   // which DRAM input col
             block_out[col * (M + PAD) + row] = static_cast<int8_t>(rounded);
         }else{
-            block_out[i] = static_cast<int8_t>(rounded);
+            // map flat DRAM index i to padded SRAM layout
+            block_out[(i / N_in) * N_out + (i % N_in)] = static_cast<int8_t>(rounded);
         }
     }
 }
@@ -253,10 +257,16 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     int warp_id = tid / 32;
     int lane_id = tid % 32;
     int q_block_idx = blockIdx.x;
+#if printIntermediateValues
+    const bool trace0 = (q_block_idx == 0 && tid == 0);
+#endif
 
     //read block_scales_Q and block_scales_Kt to dequantize
     int32sram_to_fp32<Br, Bc + PAD, false>(scores_int32, const_cast<float*>(block_scales_Q + q_block_idx), const_cast<float*>(block_scales_Kt + kv_block_idx), scores_fp32, q_block_idx);
     __syncthreads();
+#if printIntermediateValues
+    if (trace0) printf("[kv=%d] scores_int32[0]=%d  scores_fp32_dequant[0]=%.6e\n", kv_block_idx, scores_int32[0], scores_fp32[0]);
+#endif
 
     // Process WMMA_M query rows per warp (same as matmul_warp_tiled)
     for (int row_start = WMMA_M * warp_id; row_start < Br; row_start += WARPS_PER_BLOCK * WMMA_M) 
@@ -294,6 +304,9 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
                 max_new[i] = fmaxf(max_new[i], __shfl_xor_sync(FULL_MASK, max_new[i], shift));
             }
         }
+#if printIntermediateValues
+        if (trace0 && row_start == 0) printf("[kv=%d] scores_fp32_scaled[0]=%.6e  row0_max_new=%.6e\n", kv_block_idx, scores_fp32[0], max_new[0]);
+#endif
 
         // Step 2: Compute exp(score - max) and accumulate sum
         for (int col_start = Lc * lane_id; col_start < Bc; col_start += THREADS_PER_WARP * Lc) {
@@ -325,6 +338,9 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
                 sum_new[i] += __shfl_xor_sync(FULL_MASK, sum_new[i], shift);
             }
         }
+#if printIntermediateValues
+        if (trace0 && row_start == 0) printf("[kv=%d] softmax_prob[0]=%.6e  row0_sum_new=%.6e\n", kv_block_idx, scores_fp32[0], sum_new[0]);
+#endif
 
         // Step 3: Update max and sum statistics (only first lane writes)
         #pragma unroll
@@ -336,6 +352,9 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
             }
         }
         __syncthreads();  // Ensure all threads see updated sum_exp and max_cur
+#if printIntermediateValues
+        if (trace0 && row_start == 0) printf("[kv=%d] max_cur[0]=%.6e  sum_exp[0]=%.6e\n", kv_block_idx, max_cur[0], sum_exp[0]);
+#endif
         
         // Step 4: Rescale output accumulator by exp(max_old - max_new) for each row
         for (int d_idx = lane_id; d_idx < d; d_idx += THREADS_PER_WARP) {
@@ -347,8 +366,18 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     } //end for loop with row_start
     __syncthreads();
 
-    fp32_to_int8sram<Br, Bc + PAD, false, false>(scores_fp32, block_scales_P, scores_int8, kv_block_idx);
+    // Zero PAD columns so they don't corrupt scale_p computation in fp32_to_int8sram
+    for (int i = tid; i < Br * (Bc + PAD); i += THREADS) {
+        int col = i % (Bc + PAD);
+        if (col >= Bc) scores_fp32[i] = 0.0f;
+    }
     __syncthreads();
+
+    fp32_to_int8sram<Br, Bc + PAD, Bc + PAD, false, false>(scores_fp32, block_scales_P, scores_int8, kv_block_idx);
+    __syncthreads();
+#if printIntermediateValues
+    if (trace0) printf("[kv=%d] scale_p=%.6e  scores_int8[0]=%d\n", kv_block_idx, block_scales_P[kv_block_idx], (int)scores_int8[0]);
+#endif
 
     // Step 5: Accumulate O += (softmax probs) @ V
     // scores_int8: Br x Bc with stride Bc+PAD
@@ -356,10 +385,17 @@ __device__ __forceinline__ void online_softmax_and_accum_output(
     // output: Br x d with stride d+PAD
     wmma_A_B<false, Br, d, Bc>(scores_int8, values, temp_output_int32, Bc + PAD, d + PAD, d + PAD);
     __syncthreads();
+#if printIntermediateValues
+    if (trace0) printf("[kv=%d] scale_v=%.6e  temp_output_int32[0]=%d\n", kv_block_idx, block_scales_V[kv_block_idx], temp_output_int32[0]);
+#endif
 
     for(int i = tid; i < Br * (d + PAD); i += THREADS){
         output[i] += (float)(temp_output_int32[i]) * block_scales_P[kv_block_idx] * block_scales_V[kv_block_idx];
     }
+    __syncthreads();
+#if printIntermediateValues
+    if (trace0) printf("[kv=%d] output[0]_after_accum=%.6e\n", kv_block_idx, output[0]);
+#endif
 }
 
 template <int Br, int Bc, int d, int Lc>
@@ -429,9 +465,15 @@ __global__ void fa_kernel(
     __shared__ __align__(16) int8_t values[Bc * (d + PAD)];
 
     __shared__ __align__(16) float scores_fp32[Br * (Bc + PAD)];
-    __shared__ __align__(16) int scores_int32[Br * (Bc + PAD)];
 
-    __shared__ __align__(16) int temp_output_int32[Br * (d + PAD)];
+    __shared__ __align__(16) union{
+        int scores[Br * (Bc + PAD)];
+        int temp_output[Br * (d + PAD)];
+    } int32_union_buffer;
+
+    int* scores_int32 = int32_union_buffer.scores;
+    int* temp_output_int32 = int32_union_buffer.temp_output;
+
     __shared__ __align__(16) float output[Br * (d + PAD)];
 
     __shared__ __align__(16) float sum_exp[Br];
@@ -446,14 +488,13 @@ __global__ void fa_kernel(
     int row_start = warp_id * WMMA_M;  // FIX: Use WMMA_M (tile height), not WMMA_N (tile width)
 
     //quantize Q once
-    fp32_to_int8sram<Br, d + PAD, true, false>(Q, block_scales_Q, q_block, q_block_idx);
-    
-    init_output_and_stats<Br, Bc, d, Lc>(output, sum_exp, max_prev, max_curr);
+    fp32_to_int8sram<Br, d, d + PAD, true, false>(Q, block_scales_Q, q_block, q_block_idx);
+    __syncthreads();
+#if printIntermediateValues
+    if (q_block_idx == 0 && tid == 0) printf("[Q] scale_q=%.6e  q_int8[0]=%d\n", block_scales_Q[q_block_idx], (int)q_block[0]);
+#endif
 
-    // DEBUG: Track index 2359520 (q_block=2304, row=16, col=0)
-    if(q_block_idx == 2304) {
-        printf("[INIT] output[16*33+0]=%.10e\n", output[16 * (d+PAD) + 0]);
-    }
+    init_output_and_stats<Br, Bc, d, Lc>(output, sum_exp, max_prev, max_curr);
 
     // Main loop over K,V blocks
     int num_kv_blocks = (N + Bc - 1) / Bc;
@@ -463,9 +504,12 @@ __global__ void fa_kernel(
         const float *K_block = K + kv_block_idx * Bc * d;
         const float *V_block = V + kv_block_idx * Bc * d;
 
-        fp32_to_int8sram<Bc, d + PAD, false, true>(K_block, block_scales_Kt, kt, kv_block_idx);
-        fp32_to_int8sram<Bc, d + PAD, false, false>(V_block, block_scales_V, values, kv_block_idx);
+        fp32_to_int8sram<Bc, d, d + PAD, false, true>(K_block, block_scales_Kt, kt, kv_block_idx);
+        fp32_to_int8sram<Bc, d, d + PAD, false, false>(V_block, block_scales_V, values, kv_block_idx);
         __syncthreads();
+#if printIntermediateValues
+        if (q_block_idx == 0 && tid == 0) printf("[kv=%d] scale_kt=%.6e  scale_v=%.6e\n", kv_block_idx, block_scales_Kt[kv_block_idx], block_scales_V[kv_block_idx]);
+#endif
         
         // Initialize max_curr for this iteration
         // Warp warp_id initializes rows [warp_id*WMMA_M, (warp_id+1)*WMMA_M)
@@ -488,12 +532,6 @@ __global__ void fa_kernel(
         online_softmax_and_accum_output<Br, Bc, Lc, d>
         (max_curr, max_prev, sum_exp, scores_int32, scores_int8, scores_fp32, block_scales_Q, block_scales_Kt, block_scales_P, temp_output_int32, output, values, block_scales_V, inv_sqrt_d, kv_block_idx);
         __syncthreads();
-
-        // DEBUG: Track value after each KV block
-        if(q_block_idx == 2304 && tid == 0) {
-            printf("[AFTER_KV_%d] output[16*33+0]=%.10e sum_exp[16]=%.10e\n", kv_block_idx, output[16 * (d+PAD) + 0], sum_exp[16]);
-        }
-        __syncthreads();
         
         // Copy max_curr to max_prev for next iteration (only for rows this warp processes)
         if (lane_id == 0) {
@@ -509,12 +547,9 @@ __global__ void fa_kernel(
 
     // Epilogue: normalize output and write to global memory (warp/lane distribution)
     if(row_start < Br){
-        // [BEFORE_NORM] diagnostic
-        if(q_block_idx == 2304 && threadIdx.x == 0) {
-            printf("[BEFORE_NORM] output[16*33+0]=%.10e sum_exp[16]=%.10e\n", 
-                   output[16 * (d+PAD) + 0], sum_exp[16]);
-        }
-        
+#if printIntermediateValues
+        if (q_block_idx == 0 && tid == 0) printf("[epilogue] output[0]_before_norm=%.6e  sum_exp[0]=%.6e\n", output[0], sum_exp[0]);
+#endif
         for (int col_start = Lc * lane_id; col_start < d; col_start += THREADS_PER_WARP * Lc) {
             #pragma unroll
             for (int i = 0; i < WMMA_M; i++) {
@@ -532,11 +567,6 @@ __global__ void fa_kernel(
                 }
             }
         }
-        
-        // [AFTER_NORM] diagnostic
-        if(q_block_idx == 2304 && threadIdx.x == 0) {
-            printf("[AFTER_NORM] output[16*33+0]=%.10e\n", output[16 * (d+PAD) + 0]);
-        }
     }
     __syncthreads();
     
@@ -553,11 +583,9 @@ __global__ void fa_kernel(
                         float write_val = output[row * (d + PAD) + col];
                         int global_idx = (q_block_idx * Br + row) * d + col;
                         O[global_idx] = write_val;
-                        
-                        // [GLOBAL_WRITE] diagnostic for index near 2359520
-                        if(q_block_idx == 2304 && row == 16 && col == 0) {
-                            printf("[GLOBAL_WRITE] global_idx=%d write_val=%.10e\n", global_idx, write_val);
-                        }
+#if printIntermediateValues
+                        if (q_block_idx == 0 && row == 0 && col == 0) printf("[output] O[0]=%.6e\n", write_val);
+#endif
                     }
                 }
             }
