@@ -1,6 +1,0 @@
-[setup.py] Compiling only kernel: fa_tc_int8_b
-running build_ext
-W0314 22:40:24.394000 24104 /system/conda/miniconda3/envs/cloudspace/lib/python3.12/site-packages/torch/utils/cpp_extension.py:615] Attempted to use ninja as the BuildExtension backend but we could not find ninja.. Falling back to using the slow distutils backend.
-W0314 22:40:24.412000 24104 /system/conda/miniconda3/envs/cloudspace/lib/python3.12/site-packages/torch/utils/cpp_extension.py:507] The detected CUDA version (12.6) has a minor version mismatch with the version that was used to compile PyTorch (12.8). Most likely this shouldn't be a problem.
-W0314 22:40:24.413000 24104 /system/conda/miniconda3/envs/cloudspace/lib/python3.12/site-packages/torch/utils/cpp_extension.py:517] There are no g++ version bounds defined for CUDA version 12.6
-copying build/lib.linux-x86_64-cpython-312/torch_ext.cpython-312-x86_64-linux-gnu.so -> 

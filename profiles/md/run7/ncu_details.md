@@ -47,18 +47,18 @@ Allocation:
 
 | Buffer | Dimensions | Data Type | Size |
 |---|---:|---|---:|
-| `q_block` | 64 × 32 | `int8_t` | 2,048 B |
+| `q_block` | 32 × 32 | `int8_t` | 1,024 B |
 | `kt` | 32 × 32 | `int8_t` | 1,024 B |
-| `scores_fp32` | 64 × 32 | `float` | 8,192 B |
-| `scores_int32` | 64 × 32 | `int` | 8,192 B |
-| `scores_int8` | 64 × 32 | `int8_t` | 2,048 B |
-| `temp_output_int32` | 64 × 32 | `int` | 8,192 B |
-| `output` | 64 × 32 | `float` | 8,192 B |
+| `scores_fp32` | 32 × 32 | `float` | 4,096 B |
+| `scores_int32` | 32 × 32 | `int` | 4,096 B |
+| `scores_int8` | 32 × 32 | `int8_t` | 1,024 B |
+| `temp_output_int32` | 32 × 32 | `int` | 4,096 B |
+| `output` | 32 × 32 | `float` | 4,096 B |
 | `values` | 32 × 32 | `int8_t` | 1,024 B |
-| `sum_exp` | 64 | `float` | 256 B |
-| `max_prev` | 64 | `float` | 256 B |
-| `max_curr` | 64 | `float` | 256 B |
-| **Total** | | | **39,680 B** |
+| `sum_exp` | 32 | `float` | 128 B |
+| `max_prev` | 32 | `float` | 128 B |
+| `max_curr` | 32 | `float` | 128 B |
+| **Total** | | | **20,864 B** |
 
 #### AFTER
 
@@ -102,22 +102,21 @@ Allocation:
 
 Allocation:
 
-| Buffer | Declaration | Elements (formula) | Bytes | KiB | Notes |
-|---|---|---:|---:|---:|---|
-| `int8_union_buffer` (union of `q_block` / `scores`) | `int8_t q_block[Br*(d+PAD)]` / `int8_t scores[Br*(Bc+PAD)]` | 32×32 = 1024 | 1,024 B | 1.00 KiB | Reused for Q (Br×d) or scores (Br×Bc) |
-| `int8_union_buffer_2` (union of `kt` / `values`) | `int8_t kt[Bc*(d+PAD)]` / `int8_t values[Bc*(d+PAD)]` | 32×32 = 1024 | 1,024 B | 1.00 KiB | Reused for K or V |
-| `shared_temp_buffer` (union of scores/output variants) | `float scores_fp32[...]` / `int scores_int32[...]` / `int temp_output[...]` / `float output[...]` | 32×32 = 1024 (max) | 4,096 B | 4.00 KiB | Max occupant is 1024 floats/ints (4 B each) |
-| `sum_exp` | `float sum_exp[Br]` | 32 | 128 B | 0.125 KiB | per-row softmax accumulator |
-| `max_prev` | `float max_prev[Br]` | 32 | 128 B | 0.125 KiB | |
-| `max_curr` | `float max_curr[Br]` | 32 | 128 B | 0.125 KiB | |
-| `max_new` | `float max_new[Br]` | 32 | 128 B | 0.125 KiB | |
-| `sum_new` | `float sum_new[Br]` | 32 | 128 B | 0.125 KiB | |
-| `exp_max_diff` | `float exp_max_diff[Br]` | 32 | 128 B | 0.125 KiB | |
-| `warp_maxs` (in `fp32_to_int8sram`) | `float warp_maxs[WARPS_PER_BLOCK]` | 4 | 16 B | 0.0156 KiB | per-warp mins/maxs used during reduction |
-| `warp_mins` (in `fp32_to_int8sram`) | `float warp_mins[WARPS_PER_BLOCK]` | 4 | 16 B | 0.0156 KiB | |
-| `inv_sc_shared` (in `fp32_to_int8sram`) | `float` | 1 | 4 B | 0.0039 KiB | inverse scale shared across threads |
-
-Estimated total static `__shared__` usage (sum of above): **6,948 B ≈ 6.79 KiB**
+| Buffer | Dimensions | Data Type | Size |
+|---|---:|---|---:|
+| `int8_union_buffer` (union of `q_block` / `scores`) | 32 × 32 | `int8_t` | 1,024 B |
+| `int8_union_buffer_2` (union of `kt` / `values`) | 32 × 32 | `int8_t` | 1,024 B |
+| `shared_temp_buffer` (union of scores/output variants) | 32 × 32 | `float` / `int` | 4,096 B |
+| `sum_exp` | 32 | `float` | 128 B |
+| `max_prev` | 32 | `float` | 128 B |
+| `max_curr` | 32 | `float` | 128 B |
+| `max_new` | 32 | `float` | 128 B |
+| `sum_new` | 32 | `float` | 128 B |
+| `exp_max_diff` | 32 | `float` | 128 B |
+| `warp_maxs` (in `fp32_to_int8sram`) | 4 | `float` | 16 B |
+| `warp_mins` (in `fp32_to_int8sram`) | 4 | `float` | 16 B |
+| `inv_sc_shared` (in `fp32_to_int8sram`) | 1 | `float` | 4 B |
+| **Total** |  |  | **6,948 B** |
 
 ### 2. Register optimization
 
