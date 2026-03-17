@@ -406,7 +406,7 @@ __device__ void init_output_and_stats(
 }
 
 template<int Br, int Bc, int d, int Lc>
-__global__ void fa_kernel(
+__global__ __launch_bounds__(THREADS) void fa_kernel(
     const float* Q,    // [N, d]
     const float* K,    // [N, d]
     const float* V,    // [N, d]

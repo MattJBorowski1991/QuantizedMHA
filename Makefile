@@ -1,7 +1,8 @@
 
 NVCC = nvcc
 # Optimization and source-mapping for Nsight Compute; do NOT use -G here
-NVCC_FLAGS = -O3 -lineinfo -Xcompiler -Wall
+# --ptxas-options=-v prints register/smem usage per kernel at compile time
+NVCC_FLAGS = -O3 -lineinfo -Xcompiler -Wall --ptxas-options=-v
 
 # Optional max register count limit
 # Usage: make MAXRREGCOUNT=64
@@ -15,7 +16,8 @@ endif
 
 # Default target architecture (compute for PTX, sm for native SASS).
 # Override by calling, e.g. `make NVCC_ARCH=86`
-NVCC_ARCH ?= 86
+# L4 = sm_89 (Ada Lovelace), A100 = sm_80, A10/A30 = sm_86
+NVCC_ARCH ?= 89
 # Produce both native SASS (sm_XX) and PTX (compute_XX)
 NVCC_GENCODE = -gencode arch=compute_$(NVCC_ARCH),code=sm_$(NVCC_ARCH) \
 			  -gencode arch=compute_$(NVCC_ARCH),code=compute_$(NVCC_ARCH)

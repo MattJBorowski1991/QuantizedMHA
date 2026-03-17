@@ -105,9 +105,29 @@ compute-sanitizer --tool initcheck --show-backtrace yes --force-blocking-launche
 
 
 
-4. After aggressive SRAM optimizations - registers were the bottleneck (max 5 block count). Optimizations to reduce register pressure: 
+4. After aggressive SRAM optimizations - registers were the bottleneck for 5 block count. Optimizations to reduce register pressure: 
 4.1. move max_new, sum_new, exp_max_diff into SRAM within online_softmax (before these were contributing 3x8 = 24 floats per thread)
 4.2. remove pragma unrolls
-4.2. remove __forceinline__ (or replace with noinline for large device kernels). forceinline = remove call overhead, increase register presure [use for small helpers]. noinline = add call overhead, reduce register pressure [use only for large helpers]. Blank/do nothing = uses compiler heuristics, which might inline anyways.
-4.3. use __launch_bounds__(THREADS, 2)
-4.4. use -maxregcount
+4.2. remove __forceinline__ (or replace with noinline for large device kernels). forceinline = remove call overhead, increase register presure [use for small helpers]. noinline = add call overhead, reduce register pressure [use only for large helpers]. Blank/do nothing = uses compiler heuristics, which might inline anyways. -->> no improvement in duration
+4.3. use __launch_bounds__(maxThreadsPerBlock, minBlocksPerMultiprocessor) = __launch_bounds__(THREADS, 2) which guides the compiler's register allocation strategy = I will never launch more than THREADS threads per block & I will have at least 2 blocks per SM. -->> improvement by ~1% in perf
+4.4.  -maxregcount -->> didnt change regs per thread after launch_bounds found the optimal number of regs per thread (40), which verified with --ptxas-options=-v that it did not cause spilling: 
+
+nvcc -O3 -lineinfo -Xcompiler -Wall --ptxas-options=-v -gencode arch=compute_89,code=sm_89 -gencode arch=compute_89,code=compute_89 -I. -I./include  drivers/main.cu inputs/data.cu utils/verify.cu mha_kernels/fa_tc_int8_b.cu -o bin/profile_fa_tc_int8_b
+ptxas info    : 0 bytes gmem
+ptxas info    : 0 bytes gmem
+ptxas info    : 0 bytes gmem
+ptxas info    : 267 bytes gmem, 40 bytes cmem[4]
+ptxas info    : Compiling entry function '_Z9fa_kernelILi32ELi32ELi32ELi1EEvPKfS1_S1_PfS2_iif' for 'sm_89'
+ptxas info    : Function properties for _Z9fa_kernelILi32ELi32ELi32ELi1EEvPKfS1_S1_PfS2_iif
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 40 registers, used 1 barriers, 6864 bytes smem, 404 bytes cmem[0], 16 bytes cmem[2]
+ptxas info    : Compiling entry function '_Z10concat_matILi16EEvPfPKfiiiiii' for 'sm_89'
+ptxas info    : Function properties for _Z10concat_matILi16EEvPfPKfiiiiii
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 8 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compiling entry function '_Z11extract_matILi16EEvPKfPfiiiiii' for 'sm_89'
+ptxas info    : Function properties for _Z11extract_matILi16EEvPKfPfiiiiii
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 8 registers, used 0 barriers, 392 bytes cmem[0]
+Built: bin/profile_fa_tc_int8_b (kernel=fa_tc_int8_b, arch=sm_89)
+
