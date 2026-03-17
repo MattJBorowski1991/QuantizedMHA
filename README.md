@@ -4,7 +4,7 @@ High-performance CUDA implementations of FlashAttention-2 with various optimizat
 
 ## Performance Highlights
 
-**Flash Attention** = **FA**, **Tensor Cores** = **TC**, `N=16,384`.
+**Flash Attention** = **FA**, **Tensor Cores** = **TC**.
 
 | FA | TC | Tile | Int8 | Br | Kernel | ms | Profile | Setup | Notes |
 |----|----|----|-------|-----|--------|-----------|---------|-------|-------|
@@ -16,7 +16,7 @@ High-performance CUDA implementations of FlashAttention-2 with various optimizat
 | Yes | Yes | 8×32×16 | No | 32 | [fa_tc_v2a](mha_kernels/fa_tc_v2a.cu) | 6.25 | [Run 5](profiles/md/run5/ncu_details.md) | as above | +padding |
 | Yes | Yes | 8×32×16 | No | 32 | [fa_tc_v2b](mha_kernels/fa_tc_v2b.cu) | 9.60 | - | as above | +swizzling |
 | Yes | Yes | 8×32×16 | Yes | 32 | [fa_tc_int8_a](mha_kernels/fa_tc_int8_a.cu) | 9.04 | [Run 6](profiles/md/run6/ncu_Br32_vs_Br64_details.md) | as above | based on [fa_tc_v2a](mha_kernels/fa_tc_v2a.cu) |
-| Yes | Yes | 8×32×16 | Yes | 32 | [fa_tc_int8_b](mha_kernels/fa_tc_int8_b.cu) | 7.70 | [Run 7](profiles/md/run6/ncu_details.md) | 1 warp owns 16×d of Q | based on [fa_tc_v1a](mha_kernels/fa_tc_v1a.cu) |
+| Yes | Yes | 8×32×16 | Yes | 32 | [fa_tc_int8_b](mha_kernels/fa_tc_int8_b.cu) | 7.70 | [Run 7](profiles/md/run7/ncu_details.md) | 1 warp owns 16×d of Q | based on [fa_tc_v1a](mha_kernels/fa_tc_v1a.cu) |
 
 ## Profiling Results
 
@@ -63,6 +63,21 @@ Optimized SRAM usage in to enable `PAD=8` or `PAD=16` and eliminate bank conflic
 Kernels profiled: [fa_tc_v2.cu](../../../mha_kernels/fa_tc_v2.cu) and [fa_tc_v2a.cu](../../../mha_kernels/fa_tc_v2a.cu).
 
 **Detailed Analysis**: [profiles/md/run5/ncu_details.md](profiles/md/run5/ncu_details.md)
+
+### Run 6: Int8 & Tensor Cores: 2 warps per tile row
+
+Kernels profiled: [fa_tc_int8_a.cu](../../../mha_kernels/fa_tc_int8_a.cu) in two settings: Br = 32 and Br = 64.
+
+**Detailed Analysis**: [profiles/md/run6/ncu_Br32_vs_Br64_details.md](profiles/md/run6/ncu_Br32_vs_Br64_details.md)
+
+### Run 7: Int8 & Tensor Cores: 1 warp per tile row
+
+SRAM & register optimization to optimize occupancy.
+
+Kernels profiled: [fa_tc_int8_b.cu](../../../mha_kernels/fa_tc_int8_b.cu).
+
+**Detailed Analysis**: [profiles/md/run7/ncu_details.md](profiles/md/run7/ncu_details.md)
+
 
 
 ## Project Structure
