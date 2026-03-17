@@ -4,7 +4,7 @@ High-performance CUDA implementations of FlashAttention-2 with various optimizat
 
 ## Performance Highlights
 
-**Flash Attention** = **FA**, **Tensor Cores** = **TC**.
+**Flash Attention** = **FA**, **Tensor Cores** = **TC**, `N=16,384`.
 
 | FA | TC | Tile | Int8 | Br | Kernel | ms | Profile | Setup | Notes |
 |----|----|----|-------|-----|--------|-----------|---------|-------|-------|
@@ -119,6 +119,8 @@ Available binaries: `profile_unfused`, `profile_fa`, `profile_fa_int8`
 Options:
 - `--warmup=N` - Number of warmup runs (default: 2)
 - `--runs=N` - Number of profiling runs (default: 3)
+- `--check=0|1` - Enable/disable correctness check before profiling (default: 1)
+- `--no-check` - Skip correctness check before profiling
 - `--random` - Use random input data instead of constant values
 
 ### 3. Profile with Nsight Compute

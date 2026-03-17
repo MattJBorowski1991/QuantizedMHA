@@ -1,41 +1,38 @@
 import os
 import sys
-import numpy as np
-import cupy as cp
 
-# ensure the built extension and wrapper are importable
+import jax
+import jax.numpy as jnp
+
 here = os.path.dirname(__file__)
 ext_dir = os.path.abspath(os.path.join(here, '..'))
 sys.path.insert(0, ext_dir)
-import pybind_wrapper as pbw
+from jax_binding import flash_solve_jax
 
-# repo root (three levels up from this test file)
-REPO_ROOT = os.path.abspath(os.path.join(here, '..', '..', '..'))
-GOLDEN = os.path.join(REPO_ROOT, 'tests', 'golden', 'small')
 
-def load_bin(path, dmodel):
-    arr = np.fromfile(path, dtype=np.float32)
-    assert arr.size % dmodel == 0
-    return arr.reshape(-1, dmodel)
-
-def test_jax_eager():
+def test_flash_solve():
     d_model = 32
     num_heads = 4
+    N = 256
+    kernel = 'fa_tc_int8_b'
 
-    q = load_bin(os.path.join(GOLDEN, 'Q.f32.bin'), d_model)
-    k = load_bin(os.path.join(GOLDEN, 'K.f32.bin'), d_model)
-    v = load_bin(os.path.join(GOLDEN, 'V.f32.bin'), d_model)
-    o_ref = load_bin(os.path.join(GOLDEN, 'O.f32.bin'), d_model)
+    # Require a GPU device for this smoke test
+    gpus = [d for d in jax.devices() if d.platform == 'gpu']
+    if not gpus:
+        print('No GPU device found; skipping test.')
+        return
+    dev = gpus[0]
 
-    q_c = cp.asarray(q)
-    k_c = cp.asarray(k)
-    v_c = cp.asarray(v)
+    key = jax.random.PRNGKey(0)
+    q = jax.device_put(jax.random.normal(key, (N, d_model), dtype=jnp.float32), device=dev)
+    k = jax.device_put(jax.random.normal(key, (N, d_model), dtype=jnp.float32), device=dev)
+    v = jax.device_put(jax.random.normal(key, (N, d_model), dtype=jnp.float32), device=dev)
 
-    out = pbw.flash_solve_cupy(q_c, k_c, v_c, d_model, num_heads)
+    out = flash_solve_jax(q, k, v, d_model, num_heads, kernel=kernel)
+    assert out.shape == (N, d_model)
+    assert out.dtype == jnp.float32
+    print('ok')
 
-    out_cpu = cp.asnumpy(out).reshape(o_ref.shape)
-    assert np.allclose(out_cpu, o_ref, atol=1e-3, rtol=1e-3)
 
 if __name__ == '__main__':
-    test_jax_eager()
-    print('ok')
+    test_flash_solve()

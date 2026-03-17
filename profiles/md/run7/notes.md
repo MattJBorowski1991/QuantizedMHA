@@ -107,7 +107,7 @@ compute-sanitizer --tool initcheck --show-backtrace yes --force-blocking-launche
 
 4. After aggressive SRAM optimizations - registers were the bottleneck (max 5 block count). Optimizations to reduce register pressure: 
 4.1. move max_new, sum_new, exp_max_diff into SRAM within online_softmax (before these were contributing 3x8 = 24 floats per thread)
-4.2. remove pragme unills
-4.2. remove __forceinline__ (or replace with noinline for large device kernels). forceinline = remove call overhead, increase register presure [use for small helpers]. noinline = add call overhead, reduce register pressure [use only for large helpers].
+4.2. remove pragma unrolls
+4.2. remove __forceinline__ (or replace with noinline for large device kernels). forceinline = remove call overhead, increase register presure [use for small helpers]. noinline = add call overhead, reduce register pressure [use only for large helpers]. Blank/do nothing = uses compiler heuristics, which might inline anyways.
 4.3. use __launch_bounds__(THREADS, 2)
 4.4. use -maxregcount

@@ -9,6 +9,7 @@
 
 #include "mma.h"
 #include <cuda_fp16.h>
+#include <type_traits>
 using namespace nvcuda;
 
 // Flash attention with Tensor Cores and int8 quantization
@@ -20,7 +21,7 @@ using namespace nvcuda;
 #define WARPS_PER_BLOCK 4
 #define THREADS (WARPS_PER_BLOCK * THREADS_PER_WARP)
 #define FULL_MASK 0xffffffff
-#define PAD 16
+#define PAD 0
 
 //Tensor Core parameters
 constexpr int WMMA_M = 8;
@@ -110,19 +111,42 @@ static __device__ void fp32_to_int8sram(
     // threads read inv_sc_shared from sram
 
     float inv_sc = inv_sc_shared;
-    for(int i = tid; i < size; i += THREADS){
-        float v = block_in[i];
-        float scaled = v * inv_sc;
-        int rounded = __float2int_rn(scaled);
-        rounded = (rounded < -128) ? -128 : ((rounded > 127) ? 127 : rounded);
+    if constexpr(transposeInput && !isInputInDram){
+        // NOTE ABOUT "SWIZZLE" USED HERE:
+        // This is a thread-iteration swizzle (index-order swizzle), NOT an address-layout
+        // swizzle/XOR remap of shared memory. The output layout is unchanged:
+        //   block_out[col * (M + PAD) + row]
+        // We only change which (row,col) each thread handles at each step by iterating
+        // i as transposed-linear (i = col*M + row). That makes each warp write to much
+        // closer addresses in this transpose path, which reduces shared-memory bank
+        // conflicts for this store pattern.
+        for(int i = tid; i < size; i += THREADS){
+            int col = i / M;
+            int row = i % M;
+            int src_idx = row * N_in + col;
 
-        if constexpr(transposeInput){
-            int row = i / N_in;   // which DRAM input row
-            int col = i % N_in;   // which DRAM input col
+            float v = block_in[src_idx];
+            float scaled = v * inv_sc;
+            int rounded = __float2int_rn(scaled);
+            rounded = (rounded < -128) ? -128 : ((rounded > 127) ? 127 : rounded);
+
             block_out[col * (M + PAD) + row] = static_cast<int8_t>(rounded);
-        }else{
-            // map flat DRAM index i to padded SRAM layout
-            block_out[(i / N_in) * N_out + (i % N_in)] = static_cast<int8_t>(rounded);
+        }
+    }else{
+        for(int i = tid; i < size; i += THREADS){
+            float v = block_in[i];
+            float scaled = v * inv_sc;
+            int rounded = __float2int_rn(scaled);
+            rounded = (rounded < -128) ? -128 : ((rounded > 127) ? 127 : rounded);
+
+            if constexpr(transposeInput){
+                int row = i / N_in;   // which DRAM input row
+                int col = i % N_in;   // which DRAM input col
+                block_out[col * (M + PAD) + row] = static_cast<int8_t>(rounded);
+            }else{
+                // map flat DRAM index i to padded SRAM layout
+                block_out[(i / N_in) * N_out + (i % N_in)] = static_cast<int8_t>(rounded);
+            }
         }
     }
 }
@@ -158,28 +182,22 @@ static __device__ void int32sram_to_fp32(
     __syncthreads();
 }
 
-template <bool add_to_output = false, int M, int N, int K>
+template <bool add_to_output = false, int M, int N, int K, int STRIDE_A = K, int STRIDE_B = N, int STRIDE_C = N, bool B_COL_MAJOR = false>
 static __device__ void wmma_A_B(
     const int8_t* __restrict__ A,     // M x K (Q: Br x d, or P: Br x Bc)
     const int8_t* __restrict__ B,    //  K x N (K^T: d x Bc, or V: Bc x d)
-    int* C,                       //  M x N (scores: Br x Bc, or output: Br x d)
-    int stride_A = 0,               // stride for A rows (0 = default K)
-    int stride_B = 0,               // stride for B rows (0 = default N)
-    int stride_C = 0                // stride for C rows (0 = default N)
+    int* C                        //  M x N (scores: Br x Bc, or output: Br x d)
 ){
-    // Use default strides if not provided
-    if (stride_A == 0) stride_A = K;
-    if (stride_B == 0) stride_B = N;
-    if (stride_C == 0) stride_C = N;
-
     int tid = threadIdx.x;
     int warp_id = tid / 32;
 
     int tile_row = warp_id * WMMA_M;
     int tile_col = 0;          // All warps process all column chunks independently
 
+    using b_layout = typename std::conditional<B_COL_MAJOR, wmma::col_major, wmma::row_major>::type;
+
     wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, int8_t, wmma::row_major> a_frag;
-    wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, int8_t, wmma::row_major> b_frag;
+    wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, int8_t, b_layout> b_frag;
     wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, int> c_frag;
 
     // Process each column chunk of N, starting from tile_col
@@ -192,12 +210,12 @@ static __device__ void wmma_A_B(
             int a_col = k;
             int b_row = k;
 
-            const int8_t *a_ptr = A + tile_row * stride_A + a_col;
-            const int8_t *b_ptr = B + b_row * stride_B + b_col;   
+            const int8_t *a_ptr = A + tile_row * STRIDE_A + a_col;
+            const int8_t *b_ptr = B + b_row * STRIDE_B + b_col;   
 
             if(a_col + WMMA_K <= K && b_col + WMMA_N <= N){
-                wmma::load_matrix_sync(a_frag, a_ptr, stride_A);
-                wmma::load_matrix_sync(b_frag, b_ptr, stride_B);
+                wmma::load_matrix_sync(a_frag, a_ptr, STRIDE_A);
+                wmma::load_matrix_sync(b_frag, b_ptr, STRIDE_B);
                 wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
             }
         }
@@ -205,8 +223,8 @@ static __device__ void wmma_A_B(
         // If add_to_output is true, load existing C values and add them
         if constexpr (add_to_output) {
             wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, int> c_existing;
-            int* c_dst = C + tile_row * stride_C + b_col;
-            wmma::load_matrix_sync(c_existing, c_dst, stride_C, wmma::mem_row_major);
+            int* c_dst = C + tile_row * STRIDE_C + b_col;
+            wmma::load_matrix_sync(c_existing, c_dst, STRIDE_C, wmma::mem_row_major);
             
             // Element-wise addition
             for(int i = 0; i < c_frag.num_elements; ++i) {
@@ -215,8 +233,8 @@ static __device__ void wmma_A_B(
         }
 
         // Store THIS column chunk result with padded stride
-        int* c_dst = C + tile_row * stride_C + b_col;
-        wmma::store_matrix_sync(c_dst, c_frag, stride_C, wmma::mem_row_major);
+        int* c_dst = C + tile_row * STRIDE_C + b_col;
+        wmma::store_matrix_sync(c_dst, c_frag, STRIDE_C, wmma::mem_row_major);
         
         // NOTE: wmma operations are warp-synchronous, but for safety with multiple warps,
         // each warp completes its column independently. The kernel caller should 
@@ -226,7 +244,7 @@ static __device__ void wmma_A_B(
 
 // Online softmax: WMMA_M rows per warp (matching matmul parallelism)
 // Scale scores, find max, compute softmax probs, update statistics, rescale output, accumulate O += P @ V
-template<int Br, int Bc, int Lc, int d, int stride_scores = 0, int stride_output = 0>
+template<int Br, int Bc, int Lc, int d, int stride_scores = (Bc + PAD), int stride_output = (d + PAD)>
 __device__ void online_softmax_and_accum_output(
     float* __restrict__ max_cur,
     float* __restrict__ max_prev,
@@ -247,9 +265,8 @@ __device__ void online_softmax_and_accum_output(
     float inv_sqrt_d,
     int kv_block_idx
 ) {
-    // Use padded strides
-    const int sc_stride = (stride_scores == 0) ? (Bc + PAD) : stride_scores;
-    const int out_stride = (stride_output == 0) ? (d + PAD) : stride_output;
+    constexpr int sc_stride = stride_scores;
+    constexpr int out_stride = stride_output;
 
     int tid = threadIdx.x;
     int warp_id = tid / 32;
@@ -346,7 +363,7 @@ __device__ void online_softmax_and_accum_output(
     // scores_int8: Br x Bc with stride Bc+PAD
     // values: Bc x d with stride d+PAD
     // output: Br x d with stride d+PAD
-    wmma_A_B<false, Br, d, Bc>(scores_int8, values, temp_output_int32, Bc + PAD, d + PAD, d + PAD);
+    wmma_A_B<false, Br, d, Bc, Bc + PAD, d + PAD, d + PAD>(scores_int8, values, temp_output_int32);
     __syncthreads();
 
     for(int i = tid; i < Br * (d + PAD); i += THREADS){
@@ -423,7 +440,7 @@ __global__ void fa_kernel(
     int8_t* scores_int8 = int8_union_buffer.scores;
 
     __shared__ __align__(16) union{
-        int8_t kt[d * (Bc + PAD)];
+        int8_t kt[Bc * (d + PAD)];
         int8_t values[Bc * (d + PAD)];
     } int8_union_buffer_2;
 
@@ -471,8 +488,12 @@ __global__ void fa_kernel(
         const float *K_block = K + kv_block_idx * Bc * d;
         const float *V_block = V + kv_block_idx * Bc * d;
 
-        // kt and values share SRAM; quantize/consume K first
-        fp32_to_int8sram<Bc, d, d + PAD, false, true>(K_block, block_scales_Kt, kt, kv_block_idx);
+        // kt and values share SRAM; quantize/consume K first.
+        // For Q@K^T, we avoid explicit K transpose writes to shared memory:
+        // - store K as native row-major [Bc x d]
+        // - load WMMA matrix_b as col_major (ld=d+PAD), which is equivalent to K^T
+        // This is a layout-interpretation change, not an XOR bank-swizzle transform.
+        fp32_to_int8sram<Bc, d, d + PAD, false, false>(K_block, block_scales_Kt, kt, kv_block_idx);
         __syncthreads();
         
         // Initialize max_curr for this iteration
@@ -488,7 +509,9 @@ __global__ void fa_kernel(
         __syncthreads();
 
         // Compute scores = Q @ K^T = Br x Bc
-        wmma_A_B<false, Br, Bc, d>(q_block, kt, scores_int32, d + PAD, Bc + PAD, Bc + PAD);
+        // K is stored as [Bc x d] row-major but interpreted as matrix_b col_major
+        // with ld=(d+PAD), equivalent to K^T [d x Bc].
+        wmma_A_B<false, Br, Bc, d, d + PAD, d + PAD, Bc + PAD, true>(q_block, kt, scores_int32);
         __syncthreads();
 
         // Reuse the same SRAM region for V only after QK matmul finished using kt

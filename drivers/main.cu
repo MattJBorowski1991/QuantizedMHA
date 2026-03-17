@@ -40,15 +40,19 @@ int main(int argc, char** argv){
     int warmup = 2;
     int runs = 3;
     bool use_random = false;
+    bool run_correctness_check = true;
 
     for(int i = 1; i < argc; ++i){
         if(std::strncmp(argv[i], "--kernel=", 9) == 0) kernel = std::string(argv[i] + 9);
         else if(std::strcmp(argv[i], "-k") == 0 && i + 1 < argc) kernel = std::string(argv[++i]);
         else if(std::strncmp(argv[i], "--warmup=", 9) == 0) warmup = std::atoi(argv[i] + 9);
         else if(std::strncmp(argv[i], "--runs=", 7) == 0) runs = std::atoi(argv[i] + 7);
+        else if(std::strncmp(argv[i], "--check=", 8) == 0) run_correctness_check = (std::atoi(argv[i] + 8) != 0);
+        else if(std::strcmp(argv[i], "--no-check") == 0) run_correctness_check = false;
+        else if(std::strcmp(argv[i], "--check") == 0) run_correctness_check = true;
         else if(std::strcmp(argv[i], "--random") == 0) use_random = true;
         else if(std::strcmp(argv[i], "--help") == 0){
-            std::printf("Usage: %s [--kernel=KERNEL] [--warmup=N] [--runs=M] [--random]\n", argv[0]);
+            std::printf("Usage: %s [--kernel=KERNEL] [--warmup=N] [--runs=M] [--check=0|1] [--no-check] [--random]\n", argv[0]);
             std::printf("  KERNEL options: unfused, fa, fa_warps, fa_tc, fa_int8\n");
             return 0;
         }
@@ -66,20 +70,20 @@ int main(int argc, char** argv){
     // Device pointers
     float *d_Q = nullptr, *d_K = nullptr, *d_V = nullptr, *d_output = nullptr;
 
-    // Initialize host data (constant 1.0 for correctness check)
-    std::printf("Initializing host data (constant values for correctness check)...\n");
-    initialize_host_data(h_Q, h_K, h_V, N, d_model, false);
-    allocate_and_copy_to_device(h_Q, h_K, h_V, d_Q, d_K, d_V, d_output, N, d_model);
+    if (run_correctness_check) {
+        // Initialize host data (constant 1.0 for correctness check)
+        std::printf("Initializing host data (constant values for correctness check)...\n");
+        initialize_host_data(h_Q, h_K, h_V, N, d_model, false);
+        allocate_and_copy_to_device(h_Q, h_K, h_V, d_Q, d_K, d_V, d_output, N, d_model);
 
-    // Correctness check before profiling
-    {
+        // Correctness check before profiling
         std::printf("Running correctness check \n");
         solve(d_Q, d_K, d_V, d_output, N, d_model, h);
         CHECK_CUDA(cudaDeviceSynchronize());
         CHECK_CUDA(cudaMemcpy(h_output.data(), d_output, output_size * sizeof(float), cudaMemcpyDeviceToHost));
 
         std::vector<float> ref_output(output_size);
-        
+
         // Try to load cached reference, compute if not found
         ensure_cache_dir();
         std::string ref_cache_file = get_cache_filename(N, d_model);
@@ -95,10 +99,12 @@ int main(int argc, char** argv){
             return 1;
         }
         std::printf("Correctness check PASSED.\n");
-    }
 
-    // Clean up device memory for profiling phase
-    cleanup_device_data(d_Q, d_K, d_V, d_output);
+        // Clean up device memory for profiling phase
+        cleanup_device_data(d_Q, d_K, d_V, d_output);
+    } else {
+        std::printf("Skipping correctness check and CPU reference load/compute (--no-check / --check=0).\n");
+    }
 
     // Load or generate random input data for profiling (default: use cached random data)
     ensure_cache_dir();
