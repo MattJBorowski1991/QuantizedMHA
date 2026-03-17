@@ -10,12 +10,13 @@ High-performance CUDA implementations of FlashAttention-2 with various optimizat
 |----|----|----|-------|-----|--------|-----------|---------|-------|-------|
 | No | No | — | No | — | [unfused](mha_kernels/unfused.cu) | 14.4 | [Run 1](profiles/md/run1/ncu_details.md) | 3 kernels: Q@K^T (6.5), softmax (2.2), P@V (5.7) | base |
 | Yes | No | 4x32 | No | — | [fa](mha_kernels/fa.cu) | 8.33 | [Run 2](profiles/md/run2/ncu_details.md) | 1 fused kernel | - |
-| Yes | Yes | 16×16×16 | No | 64 | [fa_tc_v1a](mha_kernels/fa_tc_v1a.cu) | 5.77 | [Run 3](profiles/md/run3b/ncu_details.md) | 1 warp owns 16×d of Q | v. low occup |
+| Yes | Yes | 16×16×16 | No | 64 | [fa_tc_v1a](mha_kernels/fa_tc_v1a.cu) | 5.90 | [Run 3](profiles/md/run3b/ncu_details.md) | 1 warp owns 16×d of Q | low occup |
 | Yes | Yes | 16×16×16 | No | 64 | [fa_tc_v1b](mha_kernels/fa_tc_v1b.cu) | 6.00 | [Run 4](profiles/md/run4/ncu_details.md) | 1 warp owns 8×d of Q | - |
-| Yes | Yes | 8×32×16 | No | 64 | [fa_tc_v2](mha_kernels/fa_tc_v2.cu) | 8.29 | [Run 4](profiles/md/run4/ncu_details.md) | 2 warps own 8×d of Q | bank conflicts |
+| Yes | Yes | 8×32×16 | No | 64 | [fa_tc_v2](mha_kernels/fa_tc_v2.cu) | 8.29 | [Run 4](profiles/md/run4/ncu_details.md) | 2 warps own 8×d of Q | - |
 | Yes | Yes | 8×32×16 | No | 32 | [fa_tc_v2a](mha_kernels/fa_tc_v2a.cu) | 6.25 | [Run 5](profiles/md/run5/ncu_details.md) | as above | +padding |
 | Yes | Yes | 8×32×16 | No | 32 | [fa_tc_v2b](mha_kernels/fa_tc_v2b.cu) | 9.60 | - | as above | +swizzling |
-| Yes | Yes | 8×32×16 | Yes | 32 | [fa_tc_int8_a](mha_kernels/fa_tc_int8_a.cu) | 9.04 | [Run 6](profiles/md/run6/ncu_Br32_vs_Br64_details.md) | as above | based on v2a |
+| Yes | Yes | 8×32×16 | Yes | 32 | [fa_tc_int8_a](mha_kernels/fa_tc_int8_a.cu) | 9.04 | [Run 6](profiles/md/run6/ncu_Br32_vs_Br64_details.md) | as above | based on [fa_tc_v2a](mha_kernels/fa_tc_v2a.cu) |
+| Yes | Yes | 8×32×16 | Yes | 32 | [fa_tc_int8_b](mha_kernels/fa_tc_int8_b.cu) | 7.70 | [Run 7](profiles/md/run6/ncu_details.md) | 1 warp owns 16×d of Q | based on [fa_tc_v1a](mha_kernels/fa_tc_v1a.cu) |
 
 ## Profiling Results
 
@@ -151,4 +152,28 @@ compute-sanitizer ./bin/profile_fa_tc
 
 compute-sanitizer --tool memcheck ./bin/profile_fa_tc_v1 --warmup=1 --runs=1 2>&1 | head -150
 
+```
+
+or for debugging races when aliasing SRAM buffers:
+
+Find shared-memory hazards (test with small N, e.g. N=64)
+
+```bash
+compute-sanitizer --tool racecheck --racecheck-report all --racecheck-detect-level info \
+    --show-backtrace yes --force-blocking-launches --kernel-name kns=fa_kernel \
+    ./bin/profile_fa_tc_int8_b --warmup=0 --runs=1
+```
+
+Find bad barrier usage:
+
+```bash
+compute-sanitizer --tool synccheck --show-backtrace yes --force-blocking-launches \
+    ./bin/profile_fa_tc_int8_b --warmup=0 --runs=1
+```
+
+Find reads of uninitialized memory:
+
+```bash
+compute-sanitizer --tool initcheck --show-backtrace yes --force-blocking-launches \
+    ./bin/profile_fa_tc_int8_b --warmup=0 --runs=1
 ```
